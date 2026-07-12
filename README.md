@@ -1,5 +1,7 @@
 # Skills
 
+[![skills.sh](https://skills.sh/b/variableland/skills)](https://skills.sh/variableland/skills)
+
 A collection of [Agent Skills](https://code.claude.com/docs/en/skills) maintained by Variable Land, for use with coding agents such as Claude Code and opencode.
 
 Each skill lives in its own folder under [`skills/`](./skills) as a single `SKILL.md` with YAML frontmatter (`name`, `description`) and no additional dependencies.
