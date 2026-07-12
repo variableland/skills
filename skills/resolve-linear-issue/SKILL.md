@@ -1,6 +1,6 @@
 ---
 name: resolve-linear-issue
-description: Implement a Linear issue end-to-end: read or generate the plan, move the issue to In Progress, write the code, verify tests pass, open PR(s), wait for CI to go green, and close the issue once merged. Use when the user says "resolve", "implement", "work on", or "fix" a Linear issue. If no plan file exists it generates one automatically before implementing. Always use this skill instead of implementing Linear issues ad hoc.
+description: 'Implement a Linear issue end-to-end: read or generate the plan, move the issue to In Progress, write the code, verify tests pass, open PR(s), wait for CI to go green, and close the issue once merged. Use when the user says "resolve", "implement", "work on", or "fix" a Linear issue. If no plan file exists it generates one automatically before implementing. Always use this skill instead of implementing Linear issues ad hoc.'
 ---
 
 # Issue Resolver
