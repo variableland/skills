@@ -11,19 +11,19 @@ manage-linear-issue  →  plan-linear-issue  →  resolve-linear-issue
 
 ## Skills
 
-### [`manage-linear-issue`](./manage-linear-issue/SKILL.md)
+### [`manage-linear-issue`](./skills/manage-linear-issue/SKILL.md)
 
 Creates or edits well-structured Linear issues. Infers issue type (Bug, Feature, Improvement, Technical Debt, Documentation, Infra), maps it to a conventional-commit PR prefix (`fix`, `feat`, `refactor`, `docs`, `ci`, `chore`), applies the right labels, and proposes a parent + sub-issue breakdown for large features. Issue titles and descriptions are always written in English, regardless of the input language.
 
 Use it to report a bug, request a feature, record tech debt, or update an existing issue.
 
-### [`plan-linear-issue`](./plan-linear-issue/SKILL.md)
+### [`plan-linear-issue`](./skills/plan-linear-issue/SKILL.md)
 
 Reads a Linear issue, explores the affected part of the codebase (project conventions, GitHub permalinks referenced in the issue, related files/tests), and writes a structured implementation plan to `.plans/<ISSUE-ID>.md`. If the issue is complex, it also proposes and creates sub-issues in Linear derived from the plan's steps.
 
 Use it when you want a plan before touching any code.
 
-### [`resolve-linear-issue`](./resolve-linear-issue/SKILL.md)
+### [`resolve-linear-issue`](./skills/resolve-linear-issue/SKILL.md)
 
 Implements an issue end-to-end: generates a plan if one doesn't exist yet, creates the branch, moves the issue to *In Progress*, implements each step, runs lint/typecheck/tests, commits, opens a PR via `gh`, waits for CI, and closes the issue once the PR is merged.
 
@@ -53,10 +53,10 @@ Copy the skill directories you want into your agent's skills folder:
 
 ```bash
 # Claude Code
-cp -R manage-linear-issue plan-linear-issue resolve-linear-issue ~/.claude/skills/
+cp -R skills/manage-linear-issue skills/plan-linear-issue skills/resolve-linear-issue ~/.claude/skills/
 
 # opencode
-cp -R manage-linear-issue plan-linear-issue resolve-linear-issue ~/.opencode/skills/
+cp -R skills/manage-linear-issue skills/plan-linear-issue skills/resolve-linear-issue ~/.opencode/skills/
 ```
 
 Each skill is a single `SKILL.md` with YAML frontmatter (`name`, `description`) — no extra dependencies.
