@@ -55,6 +55,8 @@ Then continue with Step 3 using the plan just generated.
 
 ## Step 3: Prepare the branch
 
+The branch must follow the `<type>/linear-<issue-id>` convention (e.g. `fix/linear-vland-11`), where `<type>` is the conventional-commit type from the plan's PR prefix without the scope and `<issue-id>` is the lowercased Linear identifier. If the plan predates this convention — or suggests Linear's auto-generated `gitBranchName` — derive the name from the PR prefix and the issue ID instead of using it.
+
 **If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `herdr-worktree` skill is available, prefer an isolated worktree over switching branches in place: invoke that skill's `create.sh` with the suggested branch name, `cd` into the printed worktree path, and run every following step from there.
 
 Otherwise, check the current git branch. If not already on the issue branch:
