@@ -18,7 +18,7 @@ Call `list_teams` as a connectivity check before doing anything else.
 
 Look for `.linear.json` at the workspace root. Extract `teamId`, `teamName`, `projectId`, `projectName`. You can reuse the result from Step 0.
 
-If `.linear.json` is missing, tell the user to run the `linear-issue` skill first to set up the workspace state, then stop.
+If `.linear.json` is missing, tell the user to run the `manage-linear-issue` skill first to set up the workspace state, then stop.
 
 ---
 
@@ -65,7 +65,7 @@ Write a structured plan covering these sections:
 # <ISSUE-ID>: <Issue title>
 
 **Type:** <label> → `<pr-prefix>`
-**Branch:** `<git-username>/<issue-id>-<slugified-title>`
+**Branch:** `<type>/linear-<issue-id>`
 
 ---
 
@@ -103,6 +103,15 @@ Mention specific test file paths where possible.]
 - <ID> — <title>  →  <pr-prefix>
 ```
 
+### Branch naming
+
+Derive the branch from the PR prefix and the issue ID — never from Linear's auto-generated `gitBranchName` (`<username>/<issue-id>-<full-title>`), which is long and carries no semantic type:
+
+- `<type>` — the conventional-commit type from the `PR prefix`, without the scope: `fix`, `feat`, `refactor`, `docs`, `ci`, `chore`.
+- `<issue-id>` — the Linear identifier, lowercased. Keeping it in the branch name lets Linear autolink the branch and its PR to the issue.
+
+Examples: `fix/linear-vland-11`, `feat/linear-vland-12`, `ci/linear-vland-9`.
+
 ---
 
 ## Step 5: Complexity check and sub-issues
@@ -139,7 +148,7 @@ Tell the user:
 ```
 Plan written to .plans/<ISSUE-ID>.md
 
-Suggested branch: <git-username>/<issue-id>-<slugified-title>
+Suggested branch: <type>/linear-<issue-id>
 PR prefix: <pr-prefix>
 
 [If sub-issues were created:]
