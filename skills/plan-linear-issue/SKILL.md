@@ -3,7 +3,7 @@ name: plan-linear-issue
 description: Read a Linear issue and generate a structured implementation plan as a local markdown file. Use when the user wants to plan how to solve an issue, mentions a Linear issue ID or URL, says "plan" or "tackle" an issue. Explores the codebase to understand the affected area, reads project conventions, follows GitHub permalinks from the issue description, and creates sub-issues in Linear when the plan is complex. Always use this skill instead of planning ad hoc. To implement the plan afterwards, use the resolve-linear-issue skill.
 ---
 
-# Issue Resolver
+# Issue Planner
 
 ## Step 0: Verify the Linear MCP is available
 
@@ -37,6 +37,11 @@ Call `get_issue` with the identifier. Extract:
   - Acceptance criteria
   - `PR prefix` line (e.g., `refactor(db)`)
   - Any GitHub permalinks in `## Code reference` sections
+
+Then discover the issue's hierarchy — `get_issue` does **not** return children:
+
+- Call `list_issues` with `parentId: <ISSUE-ID>`. If sub-issues already exist, call `get_issue` on each one: the plan must be built around that existing breakdown (see Steps 4–5).
+- If the issue itself has a `parentId`, read the parent for context only — the plan's scope stays limited to the sub-issue.
 
 ---
 
@@ -99,8 +104,10 @@ Mention specific test file paths where possible.]
 
 ## Sub-issues
 
-[Only present if sub-issues were created. List them here after creation.]
-- <ID> — <title>  →  <pr-prefix>
+[Present when the issue has sub-issues — pre-existing or created in Step 5. Map plan
+steps to sub-issues and record the PR strategy: one PR per sub-issue when scopes are
+independent, or a single PR resolving the parent when they overlap on the same files.]
+- <ID> — <title>  →  <pr-prefix>  →  covers steps <n>–<m>
 ```
 
 ### Branch naming
@@ -116,7 +123,9 @@ Examples: `fix/linear-vland-11`, `feat/linear-vland-12`, `ci/linear-vland-9`.
 
 ## Step 5: Complexity check and sub-issues
 
-After generating the plan, evaluate whether the issue is complex:
+If the issue already has sub-issues (found in Step 2), do **not** create more. Build the plan's steps around the existing breakdown, map each step to its sub-issue in the `## Sub-issues` section, and only flag gaps: if a parent acceptance criterion is not covered by any sub-issue, say so in the report instead of silently creating new issues.
+
+Otherwise, evaluate whether the issue is complex:
 
 An issue is complex if the plan has **4 or more steps that touch clearly distinct areas** (different scopes, layers, or concerns that could be worked on independently).
 
