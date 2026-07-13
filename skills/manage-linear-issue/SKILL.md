@@ -236,6 +236,8 @@ including Context, Acceptance criteria, Code reference, and PR prefix>
 
 For a parent + sub-issues, preview the parent first, then every sub-issue in creation order — each with its own full description. Never create a parent "to get started" while sub-issues are still being discussed.
 
+The preview must be emitted as normal visible text in the conversation **before** asking for approval. Drafting it in your internal reasoning does not count — the user cannot see that. Never call `AskUserQuestion` unless the full preview markdown is already printed in the transcript above it; putting the preview inside the question text or option descriptions does not count either.
+
 Then ask the user to approve. If the `AskUserQuestion` tool is available, use it with options like **Create as shown** / **Adjust first**; otherwise ask in plain text and wait. If the user requests changes, apply them, re-show the affected parts, and ask again. Only proceed after an explicit approval **of the latest version** in this conversation — approval of an earlier draft does not carry over, and neither does a general "create an issue for X" request.
 
 For **edits**, show a field-by-field `before → after` diff of everything that will change (for description changes, show the resulting markdown of the changed sections) and confirm the same way before calling `save_issue`.
