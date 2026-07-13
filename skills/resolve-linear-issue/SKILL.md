@@ -30,6 +30,11 @@ Accept either:
 
 Call `get_issue` to get the current issue state and confirm it hasn't already been closed.
 
+Then discover the issue's hierarchy — `get_issue` does **not** return children, so skipping this check means silently missing them:
+
+1. Call `list_issues` with `parentId: <ISSUE-ID>`. If sub-issues exist, call `get_issue` on each one: their acceptance criteria are part of the scope you are about to implement, and Step 8 requires a PR strategy for them.
+2. If the issue itself has a `parentId`, read the parent for context only — do not widen the scope beyond the sub-issue.
+
 Then look for `.plans/<ISSUE-ID>.md` at the workspace root.
 
 **If the plan file exists**, read it and extract:
@@ -40,6 +45,8 @@ Then look for `.plans/<ISSUE-ID>.md` at the workspace root.
 - Steps (numbered list)
 - Testing requirements
 - Sub-issues (if any were created)
+
+Cross-check the plan's `## Sub-issues` section against the live list from the hierarchy check: sub-issues may have been created or closed after the plan was written, and the live list wins.
 
 **If the plan file does not exist**, generate the plan inline before continuing — do not stop and do not ask the user. Follow the full planning flow from the `plan-linear-issue` skill:
 
@@ -59,6 +66,8 @@ The branch must follow the `<type>/linear-<issue-id>` convention (e.g. `fix/line
 
 **If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `herdr-worktree` skill is available, prefer an isolated worktree over switching branches in place: invoke that skill's `create.sh` with the suggested branch name, `cd` into the printed worktree path, and run every following step from there.
 
+A worktree is a separate checkout that may sit on a different commit than the repository you explored (e.g. a PR merged to main in between). Re-read every file you are about to edit from inside the worktree — never edit or rewrite a file based on reads made in another checkout.
+
 Otherwise, check the current git branch. If not already on the issue branch:
 
 1. Ensure the working tree is clean (`git status`). If there are uncommitted changes, warn the user and stop.
@@ -72,7 +81,7 @@ Otherwise, check the current git branch. If not already on the issue branch:
 
 ## Step 4: Move the issue to In Progress
 
-Call `save_issue` with `state: "In Progress"` on the main issue. If sub-issues exist, move them to In Progress as well.
+Call `save_issue` with `state: "In Progress"` on the main issue and on every sub-issue discovered in Step 2 that this run will implement.
 
 ---
 
@@ -151,9 +160,14 @@ gh pr create \
 Closes <Linear issue URL>
 ```
 
-If the issue has sub-issues, open one PR per sub-issue branch (each on its own branch), and include `Closes <sub-issue URL>` in the respective PR body.
+### PR strategy when sub-issues exist
 
-After creating the PR, move the issue (or sub-issue) to **In Review** via `save_issue` with `state: "In Review"`.
+Choose deliberately, and tell the user which strategy you picked and why:
+
+- **Independent scopes** — the sub-issues touch disjoint files/areas: one branch + one PR per sub-issue, each including `Closes <sub-issue URL>` in its body.
+- **Overlapping scopes** — the sub-issues share the same files, so separate PRs would conflict or need stacking: a single cohesive PR that resolves the parent. Its body includes `Closes <parent URL>` and lists every sub-issue it covers.
+
+After creating each PR, move the issue(s) it covers to **In Review** via `save_issue` with `state: "In Review"`. In the single-PR case, also attach the PR to the parent **and** every covered sub-issue via `save_issue` with `links: [{url, title}]`, so each sub-issue points at the PR that resolves it.
 
 ---
 
@@ -189,7 +203,7 @@ gh pr view <pr-number> --json mergedAt,state
 Once `mergedAt` is non-null (PR merged to main):
 
 1. Call `save_issue` with `state: "Done"` on the main issue.
-2. If sub-issues exist and had their own PRs merged, mark each sub-issue as `Done` as well.
+2. If sub-issues had their own PRs, mark each one `Done` as its PR merges. If a single PR covered the parent and its sub-issues, mark the parent and every covered sub-issue `Done` together.
 3. Delete the local branch if it was created by this skill:
    ```bash
    git checkout main && git pull && git branch -d <branch>
@@ -207,7 +221,10 @@ Done. VLAND-5 is closed.
   PR: https://github.com/org/repo/pull/42 (merged)
   Branch: deleted locally
 
-[If sub-issues:]
+[If sub-issues, one PR each:]
   VLAND-6 — Done  (PR #43 merged)
   VLAND-7 — Done  (PR #44 merged)
+
+[If sub-issues covered by a single PR:]
+  VLAND-6, VLAND-7 — Done  (covered by PR #42)
 ```
