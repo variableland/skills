@@ -4,7 +4,7 @@
 
 A collection of [Agent Skills](https://code.claude.com/docs/en/skills) maintained by Variable Land, for use with coding agents such as Claude Code and opencode.
 
-Each skill lives in its own folder under [`skills/`](./skills) as a single `SKILL.md` with YAML frontmatter (`name`, `description`) and no additional dependencies.
+Each skill lives in its own folder under [`skills/`](./skills) as a `SKILL.md` with YAML frontmatter (`name`, `description`); some bundle helper scripts under `scripts/`.
 
 ## Install
 
@@ -49,5 +49,9 @@ Requires a Linear MCP server connected to the agent, and a `.linear.json` file a
 ```
 
 The `resolve-linear-issue` skill additionally requires the `gh` CLI to be authenticated, for opening and monitoring pull requests.
+
+### Herdr
+
+- **[herdr-worktree](./skills/herdr-worktree/SKILL.md)** — Creates a git worktree through [Herdr](https://herdr.dev) so it registers in the sidebar UI. If a `worktrees/` directory exists next to the repo, the checkout goes to `<parent>/worktrees/<repo>/<branch-slug>`; otherwise Herdr's default worktree directory is used. Used by `resolve-linear-issue` to work each issue in an isolated worktree when the agent runs inside Herdr.
 
 Additional categories will be documented here as new skills are added.
