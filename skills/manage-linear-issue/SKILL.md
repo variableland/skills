@@ -1,6 +1,6 @@
 ---
 name: manage-linear-issue
-description: Create or edit well-structured Linear issues for this workspace. Use whenever the user wants to report a bug, request a feature, record technical debt, document something, track infrastructure work, or update an existing issue. Reads .linear.json from the workspace root to know which Linear project and team to use. Automatically picks the right labels, maps issue type to a conventional commit prefix (fix/feat/refactor/docs/ci), and proposes a parent + sub-issue breakdown for large features. Always load this skill instead of creating or editing Linear issues ad hoc.
+description: Create or edit well-structured Linear issues for this workspace. Use whenever the user wants to report a bug, request a feature, record technical debt, document something, track infrastructure work, or update an existing issue. Reads .linear.json from the workspace root to know which Linear project and team to use. Automatically picks the right labels, maps issue type to a conventional commit prefix (fix/feat/refactor/docs/ci), and proposes a parent + sub-issue breakdown for large features. Always previews the full issue draft and waits for explicit user approval before writing anything to Linear. Always load this skill instead of creating or editing Linear issues ad hoc.
 ---
 
 # Linear Issue Creator
@@ -194,7 +194,7 @@ When a feature is large, **do not just ask** — propose a concrete breakdown fi
 
 1. Identify 3–6 logical sub-tasks from the user's description.
 2. Assign each sub-task its own type (a feature might break into `feat` + `refactor` + `ci` sub-issues).
-3. Show the proposed list and ask the user to adjust before creating anything.
+3. The breakdown goes through the same *Preview & confirmation* gate as everything else: preview the parent and every sub-issue in full, and let the user adjust before creating anything.
 
 **Creation order:**
 - Create the parent issue first (type: Feature, no `parentId`).
@@ -216,6 +216,32 @@ Set all new issues to **Backlog** status.
 
 ---
 
+## Preview & confirmation (mandatory)
+
+**Never write to Linear without showing a preview and getting explicit approval first.** This gates every write call — `save_issue` (create and edit) and `create_issue_label` alike. Drafting is free; writing is not.
+
+For **creation**, render each issue exactly as it will be created, with the full description markdown visible (not summarized):
+
+```
+## Preview
+
+**PROJ — <title>**
+Type: Feature · Label: Feature · Priority: No priority · Status: Backlog
+
+---
+<the complete description markdown, rendered as it will appear in Linear,
+including Context, Acceptance criteria, Code reference, and PR prefix>
+---
+```
+
+For a parent + sub-issues, preview the parent first, then every sub-issue in creation order — each with its own full description. Never create a parent "to get started" while sub-issues are still being discussed.
+
+Then ask the user to approve. If the `AskUserQuestion` tool is available, use it with options like **Create as shown** / **Adjust first**; otherwise ask in plain text and wait. If the user requests changes, apply them, re-show the affected parts, and ask again. Only proceed after an explicit approval **of the latest version** in this conversation — approval of an earlier draft does not carry over, and neither does a general "create an issue for X" request.
+
+For **edits**, show a field-by-field `before → after` diff of everything that will change (for description changes, show the resulting markdown of the changed sections) and confirm the same way before calling `save_issue`.
+
+---
+
 ## Create workflow
 
 1. **Gather info** from the user's message:
@@ -224,10 +250,11 @@ Set all new issues to **Backlog** status.
    - Scope (infer from affected area)
    - Priority (default: No priority)
    - One or two sentences of context
-2. **Ensure labels exist** — create missing ones.
-3. **Size check for features** — if large, propose sub-issue breakdown and wait for confirmation.
-4. **Create issues** — parent first, then children in order.
-5. **Report results:**
+2. **Size check for features** — if large, draft the sub-issue breakdown so it lands in the preview.
+3. **Preview & confirm** — show every issue as described in *Preview & confirmation* and wait for explicit approval. No Linear writes before this point.
+4. **Ensure labels exist** — create missing ones.
+5. **Create issues** — parent first, then children in order.
+6. **Report results:**
 
 ```
 Created:
@@ -247,8 +274,9 @@ When the user wants to modify an existing issue:
 
 1. **Identify the issue** — use the ID if provided, otherwise call `list_issues` with a search query to find it. Confirm with the user if there's any ambiguity.
 2. **Determine what to change** — title, description, type/label, priority, status, assignee, parent, or any combination.
-3. **Apply changes** with `save_issue` passing the issue `id` and only the fields that change.
-4. **Report what changed:**
+3. **Preview & confirm** — show the `before → after` diff as described in *Preview & confirmation* and wait for explicit approval.
+4. **Apply changes** with `save_issue` passing the issue `id` and only the fields that change.
+5. **Report what changed:**
 
 ```
 Updated PROJ-42:
