@@ -55,7 +55,9 @@ Then continue with Step 3 using the plan just generated.
 
 ## Step 3: Prepare the branch
 
-Check the current git branch. If not already on the issue branch:
+**If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `herdr-worktree` skill is available, prefer an isolated worktree over switching branches in place: invoke that skill's `create.sh` with the suggested branch name, `cd` into the printed worktree path, and run every following step from there.
+
+Otherwise, check the current git branch. If not already on the issue branch:
 
 1. Ensure the working tree is clean (`git status`). If there are uncommitted changes, warn the user and stop.
 2. Checkout or create the branch using the suggested branch name from the plan:
