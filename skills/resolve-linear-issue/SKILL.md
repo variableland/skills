@@ -28,12 +28,23 @@ Accept either:
 - A Linear identifier: `VLAND-5`, `PROJ-12`
 - A Linear URL: `https://linear.app/.../issue/VLAND-5/...`
 
-Call `get_issue` to get the current issue state and confirm it hasn't already been closed.
+Call `get_issue` with `includeRelations: true` to get the current issue state and confirm it hasn't already been closed.
 
 Then discover the issue's hierarchy — `get_issue` does **not** return children, so skipping this check means silently missing them:
 
-1. Call `list_issues` with `parentId: <ISSUE-ID>`. If sub-issues exist, call `get_issue` on each one: their acceptance criteria are part of the scope you are about to implement, and Step 8 requires a PR strategy for them.
+1. Call `list_issues` with `parentId: <ISSUE-ID>`. If sub-issues exist, call `get_issue` (with `includeRelations: true`) on each one: their acceptance criteria are part of the scope you are about to implement, and Step 8 requires a PR strategy for them.
 2. If the issue itself has a `parentId`, read the parent for context only — do not widen the scope beyond the sub-issue.
+
+### Execution order: blocked by / blocking relations
+
+Linear issues can be linked with **blocked by** / **blocks** relations, and those relations define the resolution order. They only appear in `get_issue` responses when called with `includeRelations: true` — which is why every read above passes it.
+
+The rule is the same in both shapes of a session — resolving one issue whose sub-issues carry these relations, or resolving a loose group of issues related this way:
+
+1. Build the dependency graph from the `blockedBy` edges of every issue in scope.
+2. Resolve in topological order: implement an issue only after all its blockers are Done or were implemented earlier in this session. Issues with no relation between them can be resolved in any order.
+3. If an issue in scope is blocked by an issue **outside** the requested scope that is not Done, stop and surface it to the user before implementing anything — do not silently widen the scope to the blocker, and do not implement a blocked issue while its blocker is unresolved.
+4. Mirror this order everywhere it shows: the implementation sequence (Step 5), the commit order, and the PR strategy (Step 8) — the PR of a blocked issue must not land before the PR of its blocker.
 
 Then look for `.plans/<ISSUE-ID>.md` at the workspace root.
 
