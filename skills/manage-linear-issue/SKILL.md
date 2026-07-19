@@ -236,9 +236,13 @@ including Context, Acceptance criteria, Code reference, and PR prefix>
 
 For a parent + sub-issues, preview the parent first, then every sub-issue in creation order — each with its own full description. Never create a parent "to get started" while sub-issues are still being discussed.
 
-The preview must be emitted as normal visible text in the conversation **before** asking for approval. Drafting it in your internal reasoning does not count — the user cannot see that. Never call `AskUserQuestion` unless the full preview markdown is already printed in the transcript above it; putting the preview inside the question text or option descriptions does not count either.
+The preview must be emitted as normal visible text in the conversation. Drafting it in your internal reasoning does not count — the user cannot see that. Putting the preview inside `AskUserQuestion` question text or option descriptions does not count either.
 
-Then ask the user to approve. If the `AskUserQuestion` tool is available, use it with options like **Create as shown** / **Adjust first**; otherwise ask in plain text and wait. If the user requests changes, apply them, re-show the affected parts, and ask again. Only proceed after an explicit approval **of the latest version** in this conversation — approval of an earlier draft does not carry over, and neither does a general "create an issue for X" request.
+**The preview message must end your turn.** In Claude Code, text emitted before a tool call in the same turn may never be rendered to the user — so if you print the preview and then call any tool (including `AskUserQuestion`) in the same turn, the user sees the question but not the preview. Therefore: finish the preview message with a plain-text approval question (e.g., "Reply **create** to create these as shown, or tell me what to adjust.") and **stop — no tool calls after the preview**. Wait for the user's next message.
+
+Only use `AskUserQuestion` for approval in a **later turn**, once the preview is already delivered in a previous message of yours and the user has had a chance to see it (e.g., after they replied with a partial adjustment and you need a follow-up choice).
+
+If the user requests changes, apply them, re-show the affected parts (again ending the turn with the preview), and ask again. Only proceed after an explicit approval **of the latest version** in this conversation — approval of an earlier draft does not carry over, and neither does a general "create an issue for X" request.
 
 For **edits**, show a field-by-field `before → after` diff of everything that will change (for description changes, show the resulting markdown of the changed sections) and confirm the same way before calling `save_issue`.
 
