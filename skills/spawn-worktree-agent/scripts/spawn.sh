@@ -57,4 +57,56 @@ fi
 
 fail() { echo "spawn.sh: $1" >&2; exit 1; }
 
-# (worktree/tab orchestration added in Task 2)
+# ---- resolve workspace id from worktree path --------------------------------
+# Herdr reports each worktree's open workspace id as `open_workspace_id`.
+ws=$(herdr worktree list --cwd "$worktree" --json 2>/dev/null \
+      | jq -er --arg p "$worktree" '.result.worktrees[] | select(.path==$p) | .open_workspace_id') \
+  || fail "could not resolve workspace id for worktree: $worktree (registered in Herdr?)"
+[ -n "$ws" ] && [ "$ws" != "null" ] || fail "worktree has no open workspace: $worktree"
+
+# ---- resolve the default (git) tab up front ---------------------------------
+git_tab=$(herdr tab list --workspace "$ws" | jq -er '.result.tabs[0].tab_id') \
+  || fail "could not resolve default tab of workspace $ws"
+
+# ---- agent tab FIRST: create it, start the agent, submit the prompt ---------
+# ORDER MATTERS: herdr 0.7.5 returns `agent_pane_busy` from `agent start` when a
+# `pane run` was issued on a sibling pane just before it. So start the agent
+# BEFORE running lazygit in the git pane. (Verified against the live server.)
+create_out=$(herdr tab create --workspace "$ws" --cwd "$worktree" --label "$kind" --no-focus) \
+  || fail "could not create agent tab"
+agent_tab=$(printf '%s' "$create_out"  | jq -er '.result.tab.tab_id')        || fail "no tab_id in tab create output"
+agent_pane=$(printf '%s' "$create_out" | jq -er '.result.root_pane.pane_id') || fail "no pane_id in tab create output"
+
+# herdr agent names must match [a-z][a-z0-9_-]{0,31}; derive from the worktree slug.
+agent_name=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^[^a-z]+//' | cut -c1-32)
+[ -n "$agent_name" ] || agent_name="worker"
+
+# Wait for the pane's shell to be ready; `agent start` rejects a not-yet-ready pane.
+herdr pane wait-output "$agent_pane" --match '❯' --timeout 15000 >/dev/null \
+  || fail "agent pane shell did not become ready"
+
+herdr agent start "$agent_name" --kind "$kind" --pane "$agent_pane" --timeout 30000 -- ${agent_args[@]+"${agent_args[@]}"} >/dev/null \
+  || fail "could not start '$kind' agent on pane $agent_pane"
+herdr agent wait "$agent_pane" --until idle --timeout 30000 >/dev/null 2>&1 || true
+herdr agent prompt "$agent_pane" "$(cat "$prompt_file")" >/dev/null \
+  || fail "could not submit prompt to the '$kind' worker"
+
+# ---- git tab AFTER: rename the default tab -> git, run lazygit --------------
+herdr tab rename "$git_tab" git >/dev/null || fail "could not rename default tab to 'git'"
+git_pane=$(herdr pane list --workspace "$ws" \
+      | jq -er --arg t "$git_tab" 'first(.result.panes[] | select(.tab_id==$t) | .pane_id)') \
+  || fail "could not resolve pane of git tab"
+herdr pane wait-output "$git_pane" --match '❯' --timeout 10000 >/dev/null 2>&1 || true
+herdr pane run "$git_pane" "$lazygit_bin" >/dev/null || fail "could not launch lazygit in git tab"
+
+# ---- focus ------------------------------------------------------------------
+if [ "$focus" -eq 1 ]; then
+  herdr workspace focus "$ws" >/dev/null 2>&1 || true
+  herdr tab focus "$agent_tab" >/dev/null 2>&1 || true
+fi
+
+# ---- structured result ------------------------------------------------------
+jq -nc --arg worktree "$worktree" --arg ws "$ws" --arg git_tab "$git_tab" \
+       --arg agent_tab "$agent_tab" --arg kind "$kind" --arg agent "$agent_name" \
+  '{ok:true, worktree:$worktree, workspace_id:$ws, kind:$kind, agent:$agent,
+    tabs:({git:$git_tab} + {($kind):$agent_tab}), worker_launched:true}'
