@@ -20,6 +20,7 @@ trap cleanup EXIT
 wt=$(bash "$create" "$branch") || { echo "FAIL: create.sh"; exit 1; }
 echo "worktree: $wt"
 repo=$(dirname "$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)")
+ws=$(herdr worktree list --cwd "$wt" --json 2>/dev/null | jq -er --arg p "$wt" 'first(.result.worktrees[]|select(.path==$p)|.open_workspace_id)') || ws=""
 pf=$(mktemp); printf 'Do nothing. Reply with exactly DONE and stop.\n' > "$pf"
 
 out=$(HERDR_SPAWN_LAZYGIT=echo bash "$spawn" --worktree "$wt" --prompt-file "$pf" --no-focus) \

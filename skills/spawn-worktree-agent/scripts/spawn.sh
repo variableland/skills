@@ -60,7 +60,7 @@ fail() { echo "spawn.sh: $1" >&2; exit 1; }
 # ---- resolve workspace id from worktree path --------------------------------
 # Herdr reports each worktree's open workspace id as `open_workspace_id`.
 ws=$(herdr worktree list --cwd "$worktree" --json 2>/dev/null \
-      | jq -er --arg p "$worktree" '.result.worktrees[] | select(.path==$p) | .open_workspace_id') \
+      | jq -er --arg p "$worktree" 'first(.result.worktrees[] | select(.path==$p) | .open_workspace_id)') \
   || fail "could not resolve workspace id for worktree: $worktree (registered in Herdr?)"
 [ -n "$ws" ] && [ "$ws" != "null" ] || fail "worktree has no open workspace: $worktree"
 
