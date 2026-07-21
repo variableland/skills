@@ -1,6 +1,6 @@
 ---
 name: spawn-worktree-agent
-description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch. Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed. Creates the worktree via herdr-worktree, then opens two tabs — `git` (lazygit) and one named after the agent kind (the worker, autonomous) — submits a specialized prompt, and reports.'
+description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch. Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed.'
 ---
 
 # Spawn Worktree Agent
@@ -24,6 +24,7 @@ there with a specialized prompt, and reports. The real work happens in the worke
 - Intent: **resolve** (implement/fix) or **investigate** (research, no code changes).
 - Agent kind: default `claude`. If the user asks for another (e.g. "usá opencode"),
   use that as `--kind` (valid kinds: claude, opencode, codex, gemini, cursor, ...).
+- **Autonomous flag:** for `--kind claude`, spawn.sh defaults to `--dangerously-skip-permissions` (no action needed). For any OTHER kind you MUST pass that agent's non-interactive/autonomous flag via `--agent-arg <flag>` — otherwise the worker stalls at its own permission prompt. If you do not know the agent's autonomous flag, ASK THE USER before launching; do not launch a non-claude worker without one.
 - Branch `<type>/<slug>`: type `feat`/`fix` (resolve) or `investigate`; slug = short
   kebab-case summary. Use an explicit name if the user gave one.
 
@@ -46,24 +47,18 @@ The prompt must be self-contained — the worker starts with zero conversation h
 
 ## Step 3: Create the worktree (via the herdr-worktree skill)
 
-Invoke the `herdr-worktree` skill to create the worktree for `<branch>` (pass
-`--base <ref>` if needed). Capture the absolute worktree path it prints.
+Follow the `herdr-worktree` skill: read its SKILL.md and run its `scripts/create.sh <branch> [--base <ref>]` exactly as documented there. Capture the absolute worktree path it prints (its last output line).
 
-Do NOT create the worktree with a bare `git worktree add` or by calling another
-skill's script directly — go through the skill so the Herdr UI stays in sync.
+Do NOT substitute a bare `git worktree add` — Herdr's sidebar cannot see worktrees created that way.
 
 ## Step 4: Set up tabs and launch the worker
 
 ```bash
 bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" [--kind <kind>]
+bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" --kind <other-kind> --agent-arg <autonomous-flag>
 ```
 
-It renames the worktree's default tab to `git` (lazygit), creates a tab named after
-the kind hosting the worker (started with `agent start --kind`, prompted with the
-task), moves Herdr focus there, and prints a one-line JSON result. For `--kind claude`
-it defaults the worker to `--dangerously-skip-permissions`; for other kinds pass the
-agent's autonomous flag(s) via `--agent-arg <arg>` (repeatable). Add `--no-focus` only
-if the user asked not to switch focus.
+It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. For `--kind claude` it defaults the worker to `--dangerously-skip-permissions`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` only if the user asked not to switch focus.
 
 ## Step 5: Report
 
@@ -76,6 +71,8 @@ Parse the JSON and tell the user, e.g.:
 
 If any step failed, report which step and the error. If the worktree was created but
 tab setup failed, say so — it still exists in the sidebar; the user can retry or remove it.
+
+After reporting, remove the temp prompt file: `rm -f "$prompt_file"`.
 
 ## Cleanup (when the worker's work is done and merged)
 
