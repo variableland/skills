@@ -13,8 +13,9 @@ usage: spawn.sh --worktree <path> --prompt-file <path> [--kind <kind>] [--agent-
   --worktree      absolute path of an existing Herdr-registered worktree
   --prompt-file   file with the specialized task prompt for the agent
   --kind          herdr agent kind (default: claude); e.g. claude, opencode, codex, gemini
-  --agent-arg     extra arg passed to the agent after `--` (repeatable). Default when
-                  --kind claude and none given: --dangerously-skip-permissions
+  --agent-arg     extra arg passed to the agent after `--` (repeatable). Defaults when
+                  none given: claude -> --dangerously-skip-permissions,
+                  opencode -> --auto
   --no-focus      do not move Herdr focus to the new workspace
 EOF
   exit 2
@@ -46,13 +47,17 @@ command -v jq    >/dev/null 2>&1 || { echo "error: jq not on PATH" >&2; exit 1; 
 
 lazygit_bin="${HERDR_SPAWN_LAZYGIT:-lazygit}"
 command -v "$lazygit_bin" >/dev/null 2>&1 || { echo "error: '$lazygit_bin' not on PATH" >&2; exit 1; }
-if [ "$kind" = "claude" ]; then
-  command -v claude >/dev/null 2>&1 || { echo "error: claude not on PATH (needed for --kind claude)" >&2; exit 1; }
-fi
+case "$kind" in
+  claude)   command -v claude   >/dev/null 2>&1 || { echo "error: claude not on PATH (needed for --kind claude)" >&2; exit 1; } ;;
+  opencode) command -v opencode >/dev/null 2>&1 || { echo "error: opencode not on PATH (needed for --kind opencode)" >&2; exit 1; } ;;
+esac
 
-# Default agent args for the claude kind.
-if [ "${#agent_args[@]}" -eq 0 ] && [ "$kind" = "claude" ]; then
-  agent_args=(--dangerously-skip-permissions)
+# Default autonomous flags per agent kind (only when no --agent-arg was given).
+if [ "${#agent_args[@]}" -eq 0 ]; then
+  case "$kind" in
+    claude)   agent_args=(--dangerously-skip-permissions) ;;
+    opencode) agent_args=(--auto) ;;
+  esac
 fi
 
 fail() { echo "spawn.sh: $1" >&2; exit 1; }
