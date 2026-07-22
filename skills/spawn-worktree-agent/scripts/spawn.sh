@@ -62,6 +62,12 @@ fi
 
 fail() { echo "spawn.sh: $1" >&2; exit 1; }
 
+# Reap stale spawn prompt files from previous runs. Workers read their prompt
+# file shortly after launch, so files older than a day in the shared scratch dir
+# are safe to remove — this keeps the launcher's convention dir self-cleaning.
+spawn_scratch="${TMPDIR:-/tmp}/herdr-spawn"
+[ -d "$spawn_scratch" ] && find "$spawn_scratch" -maxdepth 1 -type f -name '*.md' -mtime +1 -delete 2>/dev/null || true
+
 # ---- resolve workspace id from worktree path --------------------------------
 # Herdr reports each worktree's open workspace id as `open_workspace_id`.
 ws=$(herdr worktree list --cwd "$worktree" --json 2>/dev/null \

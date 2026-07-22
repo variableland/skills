@@ -40,7 +40,14 @@ there with a specialized prompt, and reports. The real work happens in the worke
 
 ## Step 2: Compose the worker prompt
 
-Write the prompt to a temp file: `prompt_file=$(mktemp)`. Include, in the user's language:
+Write the prompt to a readably-named file in the spawn scratch dir (so it's easy to find, and `spawn.sh` auto-cleans it later):
+
+```bash
+spawn_dir="${TMPDIR:-/tmp}/herdr-spawn"; mkdir -p "$spawn_dir"
+prompt_file=$(mktemp "$spawn_dir/<branch-slug>-XXXXXX.md")   # <branch-slug> = the branch with / turned into -
+```
+
+The path is absolute, so a cross-repo worker reads it regardless of its working directory. Include, in the user's language:
 
 1. The task exactly as the user described it.
 2. Context: repo name, the branch, and "You are in an isolated git worktree on branch
@@ -84,7 +91,7 @@ Parse the JSON and tell the user, e.g.:
 If any step failed, report which step and the error. If the worktree was created but
 tab setup failed, say so — it still exists in the sidebar; the user can retry or remove it.
 
-Leave the temp prompt file in place — the worker reads it *after* launch (and may re-read it while working), so do NOT delete it when the launcher finishes. Use an absolute `mktemp` path so a cross-repo worker can read it regardless of its working directory; the OS reclaims the temp file later.
+Leave the prompt file in place — the worker reads it *after* launch (and may re-read it while working), so do NOT delete it when the launcher finishes. It lives in `${TMPDIR:-/tmp}/herdr-spawn/` with a readable name; `spawn.sh` auto-reaps files older than a day there on each run, and `rm -f "${TMPDIR:-/tmp}/herdr-spawn/"*.md` clears them all.
 
 ## Cleanup (when the worker's work is done and merged)
 
