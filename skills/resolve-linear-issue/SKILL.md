@@ -1,6 +1,6 @@
 ---
 name: resolve-linear-issue
-description: 'Implement a Linear issue end-to-end: read or generate the plan, move the issue to In Progress, write the code, verify tests pass, open PR(s), wait for CI to go green, and close the issue once merged. Use when the user says "resolve", "implement", "work on", or "fix" a Linear issue. If no plan file exists it generates one automatically before implementing. Always use this skill instead of implementing Linear issues ad hoc.'
+description: 'Implement a Linear issue end-to-end: read or generate the plan, move the issue to In Progress, write the code, verify tests pass, open PR(s), wait for CI to go green, and close the issue once merged. Inside Herdr (HERDR_ENV=1) with the spawn-worktree-agent skill installed, the implementation is delegated to an autonomous worker in an isolated worktree instead of done in-session. Use when the user says "resolve", "implement", "work on", or "fix" a Linear issue. If no plan file exists it generates one automatically before implementing. Always use this skill instead of implementing Linear issues ad hoc.'
 ---
 
 # Issue Resolver
@@ -84,11 +84,29 @@ Then continue with Step 3 using the plan just generated.
 
 ---
 
-## Step 3: Prepare the branch
+## Step 3: Choose the execution mode and prepare the branch
 
 The branch must follow the `<type>/linear-<issue-id>` convention (e.g. `fix/linear-vland-11`), where `<type>` is the conventional-commit type from the plan's PR prefix without the scope and `<issue-id>` is the lowercased Linear identifier. If the plan predates this convention — or suggests Linear's auto-generated `gitBranchName` — derive the name from the PR prefix and the issue ID instead of using it.
 
-**If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `herdr-worktree` skill is available, prefer an isolated worktree over switching branches in place: invoke that skill's `create.sh` with the suggested branch name, `cd` into the printed worktree path, and run every following step from there.
+### Delegated mode — inside Herdr
+
+**If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `spawn-worktree-agent` skill is available, do NOT implement in this session: delegate the implementation to an autonomous worker in an isolated worktree. This session only prepares the launch and reports.
+
+1. Complete Step 4 (move the issue to In Progress) from this session **before** launching — the worker session may not have the Linear MCP available.
+2. Follow the `spawn-worktree-agent` skill with intent **resolve**, the branch name above as the explicit branch name, and the default agent kind unless the user asked for another. (It uses `herdr-worktree` internally to create the worktree.)
+3. Compose the worker prompt per that skill's Step 2, with one deliberate override: its default resolve prompt forbids opening a PR, but this skill's contract is end-to-end, so instruct the worker to open the PR and follow through. The prompt file must contain:
+   - The issue identifier and URL, plus any design reference URLs from Step 2.
+   - The full plan pasted inline — `.plans/` is gitignored, so the worktree checkout will NOT contain the plan file. Also include the plan's absolute path in the main checkout for reference.
+   - Instructions to execute Steps 5–10 of this skill: implement the plan (matching the design details folded into it), run lint → typecheck → tests until green (Step 6), commit using the plan's PR prefix (Step 7), open the PR(s) per the Step 8 template and sub-issue strategy, watch CI and fix failures (Step 9), and close the issue once merged (Step 10).
+   - Linear state updates from the worker (In Review when a PR opens, Done once it merges): attempt them via the Linear MCP; if it is unreachable from the worker session, list the pending state changes in the final summary instead of failing.
+4. Spawn a **single worker** for the whole run, sub-issues included; the worker applies the sub-issue PR strategy (Step 8) from inside its worktree, creating additional branches there if the independent-scopes strategy calls for them.
+5. Report per `spawn-worktree-agent`'s Step 5, plus the Linear state change already made, then stop — Steps 5–11 run in the worker, not in this session.
+
+### In-session mode — everywhere else
+
+If not inside Herdr, or `spawn-worktree-agent` is not available, implement in this session.
+
+If `HERDR_ENV` is set and only the `herdr-worktree` skill is available, still prefer an isolated worktree over switching branches in place: invoke that skill's `create.sh` with the suggested branch name, `cd` into the printed worktree path, and run every following step from there.
 
 A worktree is a separate checkout that may sit on a different commit than the repository you explored (e.g. a PR merged to main in between). Re-read every file you are about to edit from inside the worktree — never edit or rewrite a file based on reads made in another checkout.
 
