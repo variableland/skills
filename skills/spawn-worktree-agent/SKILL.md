@@ -14,7 +14,8 @@ there with a specialized prompt, and reports. The real work happens in the worke
 1. Running inside Herdr: `HERDR_ENV` is `1`. If not, this skill does not apply —
    tell the user and stop.
 2. herdr **>= 0.7.5** (`herdr --version`). Older versions lack `agent start --kind`.
-3. `herdr`, `jq`, `lazygit` on `PATH`. For the default `claude` kind, `claude` too.
+3. `herdr`, `jq`, `lazygit` on `PATH`. For the default `claude` kind, `claude` too;
+   for `--kind opencode`, `opencode`.
 4. The `herdr-worktree` skill is installed. If not, tell the user to install it and stop.
 5. For `--kind claude`: the one-time `--dangerously-skip-permissions` bypass warning
    must have been accepted once on this machine, or the worker will wait at that prompt.
@@ -24,7 +25,16 @@ there with a specialized prompt, and reports. The real work happens in the worke
 - Intent: **resolve** (implement/fix) or **investigate** (research, no code changes).
 - Agent kind: default `claude`. If the user asks for another (e.g. "usá opencode"),
   use that as `--kind` (valid kinds: claude, opencode, codex, gemini, cursor, ...).
-- **Autonomous flag:** for `--kind claude`, spawn.sh defaults to `--dangerously-skip-permissions` (no action needed). For any OTHER kind you MUST pass that agent's non-interactive/autonomous flag via `--agent-arg <flag>` — otherwise the worker stalls at its own permission prompt. If you do not know the agent's autonomous flag, ASK THE USER before launching; do not launch a non-claude worker without one.
+- **Autonomous flag:** spawn.sh applies a default autonomous flag for known kinds
+  (no action needed):
+  - `claude` → `--dangerously-skip-permissions`
+  - `opencode` → `--auto` (auto-approves permissions not explicitly denied — opencode's
+    equivalent of claude's `--dangerously-skip-permissions`)
+
+  For any OTHER kind you MUST pass that agent's non-interactive/autonomous flag via
+  `--agent-arg <flag>` — otherwise the worker stalls at its own permission prompt. If
+  you do not know the agent's autonomous flag, ASK THE USER before launching; do not
+  launch a worker of an unknown kind without one.
 - Branch `<type>/<slug>`: type `feat`/`fix` (resolve) or `investigate`; slug = short
   kebab-case summary. Use an explicit name if the user gave one.
 
@@ -60,7 +70,7 @@ bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file 
 bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" --kind <other-kind> --agent-arg <autonomous-flag>
 ```
 
-It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. For `--kind claude` it defaults the worker to `--dangerously-skip-permissions`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
+It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. When no `--agent-arg` is given it defaults the worker's autonomous flag by kind: `claude` → `--dangerously-skip-permissions`, `opencode` → `--auto`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
 
 ## Step 5: Report
 
