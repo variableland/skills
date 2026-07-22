@@ -51,6 +51,8 @@ Follow the `herdr-worktree` skill: read its SKILL.md and run its `scripts/create
 
 Do NOT substitute a bare `git worktree add` — Herdr's sidebar cannot see worktrees created that way.
 
+**Nested spawning is supported.** If you are already inside a linked worktree (a spawned worker spawning another worker), `herdr-worktree`'s `create.sh` targets the repo's parent workspace automatically — worktree creation just works. Do not work around it by unsetting `HERDR_WORKSPACE_ID` or falling back to `git worktree add`.
+
 ## Step 4: Set up tabs and launch the worker
 
 ```bash
@@ -58,7 +60,7 @@ bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file 
 bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" --kind <other-kind> --agent-arg <autonomous-flag>
 ```
 
-It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. For `--kind claude` it defaults the worker to `--dangerously-skip-permissions`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` only if the user asked not to switch focus.
+It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. For `--kind claude` it defaults the worker to `--dangerously-skip-permissions`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
 
 ## Step 5: Report
 
