@@ -1,6 +1,6 @@
 ---
 name: spawn-worktree-agent
-description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch. Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed.'
+description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch — including for a repo other than the current session''s ("spawn a worker for repo X", "delegá esto en el otro repo"). Not for ordinary same-session delegation (subagents/background tasks that need no new worktree). Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed.'
 ---
 
 # Spawn Worktree Agent
@@ -68,7 +68,7 @@ Follow the `herdr-worktree` skill: read its SKILL.md and run its `scripts/create
 
 Do NOT substitute a bare `git worktree add` — Herdr's sidebar cannot see worktrees created that way.
 
-**Nested and cross-repo spawning are supported.** `herdr-worktree`'s `create.sh` always resolves the target repo's parent workspace by path, so it works whether you are inside a linked worktree (a worker spawning another worker) or targeting a **different repo** than the current session's. For a cross-repo spawn, run `create.sh` with the **target repo as the working directory** (e.g. `cd <other-repo> && bash <herdr-worktree>/scripts/create.sh <branch> --base origin/main`) so it resolves that repo, not the session's. Do not work around any of this by unsetting `HERDR_WORKSPACE_ID` or falling back to `git worktree add`.
+**Nested and cross-repo spawning are supported.** `herdr-worktree`'s `create.sh` always resolves the target repo's parent workspace by path, so it works whether you are inside a linked worktree (a worker spawning another worker) or targeting a **different repo** than the current session's. For a cross-repo spawn, run `create.sh` with the **target repo as the working directory**, in a **subshell** so your own working directory doesn't stay changed for the rest of the session: `(cd <other-repo> && bash <herdr-worktree-skill-dir>/scripts/create.sh <branch> --base origin/main)`. Do not work around any of this by unsetting `HERDR_WORKSPACE_ID` or falling back to `git worktree add`.
 
 ## Step 4: Set up tabs and launch the worker
 
@@ -77,16 +77,18 @@ bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file 
 bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" --kind <other-kind> --agent-arg <autonomous-flag>
 ```
 
-It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind`, with the task delivered as the worker's **launch argument** — a one-line instruction to read the prompt file — so it can't be lost the way text typed into the TUI after startup can). It then **verifies the worker actually begins the task** before reporting success; if the worker never starts, spawn.sh fails loudly instead of reporting a launched-but-dead worker. It moves Herdr focus to the worker tab and prints a one-line JSON result. When no `--agent-arg` is given it defaults the worker's autonomous flag by kind: `claude` → `--dangerously-skip-permissions`, `opencode` → `--auto`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
+It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind`, with the task delivered as the worker's **launch argument** — a one-line instruction to read the prompt file — so it can't be lost the way text typed into the TUI after startup can). It then **verifies the worker actually begins the task** before reporting success (if the worker stays idle it re-delivers the instruction once via `agent prompt`; if it still won't start, spawn.sh fails loudly — and tears the agent tab down — instead of reporting a launched-but-dead worker). The `git` tab is best-effort: a lazygit hiccup never fails a successful delegation, it just sets `git_tab_ready:false` in the JSON. It moves Herdr focus to the worker tab and prints a one-line JSON result. When no `--agent-arg` is given it defaults the worker's autonomous flag by kind: `claude` → `--dangerously-skip-permissions`, `opencode` → `--auto`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
 
 ## Step 5: Report
 
-Parse the JSON and tell the user, e.g.:
+Compose the report from the JSON **plus what you already know**. The JSON carries `worktree`, `workspace_id`, `kind`, `agent`, `tabs`, `git_tab_ready`, `worker_launched` — it does **NOT** carry the branch; use the branch you chose in Step 1. E.g.:
 
-    Worktree listo: <path>  (branch <branch>, workspace <workspace_id>, agente <kind>)
+    Worktree listo: <path>  (branch <branch-from-Step-1>, workspace <workspace_id>, agente <kind>)
       tab git    → lazygit
-      tab <kind> → <kind> (autónomo) — worker lanzado
+      tab <kind> → <kind> (autónomo) — worker lanzado y verificado
     Foco movido al worktree.
+
+Adjust to reality: say "Foco movido" only if you did not pass `--no-focus`; if `git_tab_ready` is `false`, say the git tab setup failed but the worker is running fine (the user can open lazygit by hand).
 
 If any step failed, report which step and the error. If the worktree was created but
 tab setup failed, say so — it still exists in the sidebar; the user can retry or remove it.
