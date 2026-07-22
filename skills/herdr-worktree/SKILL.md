@@ -30,7 +30,7 @@ On success the script prints exactly one line: **the absolute path of the new wo
 2. Picks the checkout path by convention:
    - A `worktrees/` directory exists next to the repo → `<parent>/worktrees/<repo>/<branch-slug>` (slashes in the branch become dashes). Creating that directory is how a group of sibling repos opts into this layout.
    - Otherwise → Herdr's configured default (`[worktrees].directory`, usually `~/.herdr/worktrees`).
-3. Creates the worktree through `herdr worktree create`, so it appears in the Herdr sidebar as a workspace linked to the repo. Inside a pane the target session and workspace are resolved from the injected `HERDR_WORKSPACE_ID`/`HERDR_SOCKET_PATH`; outside a pane it falls back to resolving the workspace by repo path.
+3. Creates the worktree through `herdr worktree create`, so it appears in the Herdr sidebar as a workspace linked to the repo. Inside a pane the target session and workspace are resolved from the injected `HERDR_WORKSPACE_ID`/`HERDR_SOCKET_PATH`; outside a pane it falls back to resolving the workspace by repo path. **From inside a linked worktree** (e.g. a worker spawning another worker) the injected id is that linked worktree's own workspace, which `herdr worktree create` refuses (`linked_worktree_source`) — new worktrees must originate from the repo's parent workspace. The script detects this (its toplevel differs from the repo root) and targets the parent workspace by repo path instead, so nested worktree creation works without any caller workaround.
 
 Note: git identity is not this skill's concern — conditional gitconfig includes key off the repo location, and linked worktrees inherit the main repo's identity automatically.
 

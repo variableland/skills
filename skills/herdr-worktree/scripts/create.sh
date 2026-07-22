@@ -32,22 +32,44 @@ parent=$(dirname "$repo_root")
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
-args=(worktree create --branch "$branch" "$focus" --json)
-[ -n "$base" ] && args+=(--base "$base")
+# Build the `herdr worktree create` args. $1 selects how to target the Herdr
+# workspace: "workspace" (pass the injected id) or "cwd" (resolve by repo path).
+build_args() {
+  args=(worktree create --branch "$branch" "$focus" --json)
+  [ -n "$base" ] && args+=(--base "$base")
+  if [ "$1" = "workspace" ]; then
+    args+=(--workspace "$HERDR_WORKSPACE_ID")
+  else
+    args+=(--cwd "$repo_root")
+  fi
+  if [ -d "$parent/worktrees" ]; then
+    slug="${branch//\//-}"
+    args+=(--path "$parent/worktrees/$repo/$slug")
+  fi
+}
 
-# Inside a Herdr pane the workspace id is injected; otherwise resolve by path.
-if [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
-  args+=(--workspace "$HERDR_WORKSPACE_ID")
+# Inside a Herdr pane the workspace id is injected. But when the pane lives in a
+# LINKED worktree, that id is the linked worktree's own workspace, which
+# `herdr worktree create` rejects (linked_worktree_source) — new worktrees must
+# originate from the repo's parent workspace. So only pass --workspace from the
+# main checkout; from a linked worktree, resolve the parent workspace by the main
+# repo path. Detect a linked worktree: its toplevel differs from the repo root.
+toplevel=$(git rev-parse --show-toplevel)
+if [ -n "${HERDR_WORKSPACE_ID:-}" ] && [ "$toplevel" = "$repo_root" ]; then
+  mode=workspace
 else
-  args+=(--cwd "$repo_root")
+  mode=cwd
 fi
 
-if [ -d "$parent/worktrees" ]; then
-  slug="${branch//\//-}"
-  args+=(--path "$parent/worktrees/$repo/$slug")
-fi
+build_args "$mode"
+out=$("$herdr_bin" "${args[@]}") || true
 
-out=$("$herdr_bin" "${args[@]}")
+# Defense in depth: if Herdr still rejects because the target resolved to a
+# linked-worktree workspace, retry once resolving the parent workspace by path.
+if [ "$mode" = "workspace" ] && printf '%s' "$out" | jq -e '.error.code=="linked_worktree_source"' >/dev/null 2>&1; then
+  build_args cwd
+  out=$("$herdr_bin" "${args[@]}") || true
+fi
 
 if ! path=$(printf '%s' "$out" | jq -er '.result.worktree.path'); then
   echo "herdr worktree create failed:" >&2
