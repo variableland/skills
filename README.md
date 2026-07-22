@@ -12,16 +12,6 @@ Each skill lives in its own folder under [`skills/`](./skills) as a `SKILL.md` w
 npx skills@latest add variableland/skills
 ```
 
-Individual skills can also be installed by hand:
-
-```bash
-# Claude Code
-cp -R skills/<skill-name> ~/.claude/skills/
-
-# opencode
-cp -R skills/<skill-name> ~/.opencode/skills/
-```
-
 ## Reference
 
 ### Linear
@@ -41,7 +31,7 @@ Requirements: a Linear MCP server connected to the agent, and a `.linear.json` f
 
 ### Herdr
 
-For sessions running inside [Herdr](https://herdr.dev) (`HERDR_ENV=1`):
+For sessions running inside [Herdr](https://herdr.dev):
 
 - **[herdr-worktree](./skills/herdr-worktree/SKILL.md)** — Creates a git worktree that registers in Herdr's sidebar (a bare `git worktree add` would be invisible there).
 - **[spawn-worktree-agent](./skills/spawn-worktree-agent/SKILL.md)** — Delegates a task or investigation to an autonomous worker agent (Claude by default; any Herdr kind) in an isolated worktree created via `herdr-worktree`. Supports nested and cross-repo spawning. Requires herdr >= 0.7.5.
