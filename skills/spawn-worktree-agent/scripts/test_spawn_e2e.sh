@@ -14,6 +14,12 @@ create="/Users/ricardo.quiroz/Developer/vland/skills/skills/herdr-worktree/scrip
 branch="probe/spawn-e2e-$$"
 ws="" ; repo="" ; pf=""
 cleanup() {
+  # $ws can be empty if the post-create resolution failed; re-resolve from the
+  # worktree path so a pre-JSON spawn.sh failure still gets its worktree removed.
+  if [ -z "$ws" ] && [ -n "${wt:-}" ]; then
+    ws=$(herdr worktree list --cwd "$wt" --json 2>/dev/null \
+          | jq -er --arg p "$wt" 'first(.result.worktrees[]|select(.path==$p)|.open_workspace_id)' 2>/dev/null) || ws=""
+  fi
   [ -n "$ws" ] && herdr worktree remove --workspace "$ws" --force >/dev/null 2>&1
   [ -n "$repo" ] && git -C "$repo" branch -D "$branch" >/dev/null 2>&1
   [ -n "$pf" ] && rm -f "$pf"

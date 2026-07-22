@@ -25,7 +25,8 @@ while [ $# -gt 0 ]; do
 done
 
 # Resolve the main repo root even when invoked from inside a linked worktree.
-common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+  || { echo "error: not inside a git repository — run from the target repo" >&2; exit 1; }
 repo_root=$(dirname "$common_dir")
 repo=$(basename "$repo_root")
 parent=$(dirname "$repo_root")
@@ -50,14 +51,13 @@ fi
 # herdr writes its result JSON to stdout on success and its error JSON to stderr
 # on failure — capture them separately so a failure surfaces the real error.
 err=$(mktemp)
+trap 'rm -f "$err"' EXIT
 out=$("$herdr_bin" "${args[@]}" 2>"$err") || true
 if ! path=$(printf '%s' "$out" | jq -er '.result.worktree.path' 2>/dev/null); then
   echo "herdr worktree create failed:" >&2
   cat "$err" >&2
   [ -n "$out" ] && printf '%s\n' "$out" >&2
-  rm -f "$err"
   exit 1
 fi
-rm -f "$err"
 
 echo "$path"
