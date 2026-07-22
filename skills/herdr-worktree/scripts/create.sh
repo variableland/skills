@@ -32,49 +32,32 @@ parent=$(dirname "$repo_root")
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
-# Build the `herdr worktree create` args. $1 selects how to target the Herdr
-# workspace: "workspace" (pass the injected id) or "cwd" (resolve by repo path).
-build_args() {
-  args=(worktree create --branch "$branch" "$focus" --json)
-  [ -n "$base" ] && args+=(--base "$base")
-  if [ "$1" = "workspace" ]; then
-    args+=(--workspace "$HERDR_WORKSPACE_ID")
-  else
-    args+=(--cwd "$repo_root")
-  fi
-  if [ -d "$parent/worktrees" ]; then
-    slug="${branch//\//-}"
-    args+=(--path "$parent/worktrees/$repo/$slug")
-  fi
-}
-
-# Inside a Herdr pane the workspace id is injected. But when the pane lives in a
-# LINKED worktree, that id is the linked worktree's own workspace, which
-# `herdr worktree create` rejects (linked_worktree_source) — new worktrees must
-# originate from the repo's parent workspace. So only pass --workspace from the
-# main checkout; from a linked worktree, resolve the parent workspace by the main
-# repo path. Detect a linked worktree: its toplevel differs from the repo root.
-toplevel=$(git rev-parse --show-toplevel)
-if [ -n "${HERDR_WORKSPACE_ID:-}" ] && [ "$toplevel" = "$repo_root" ]; then
-  mode=workspace
-else
-  mode=cwd
+# Always target the worktree's parent workspace by repo path (--cwd), never by
+# the injected HERDR_WORKSPACE_ID. Path resolution is correct in every case:
+#   - main checkout: resolves the repo's own workspace;
+#   - inside a linked worktree (a worker spawning another worker): the injected
+#     id is the linked worktree's own workspace, which `herdr worktree create`
+#     rejects (linked_worktree_source) — --cwd resolves the parent instead;
+#   - cross-repo (creating a worktree for a repo other than the session's): the
+#     injected id belongs to a different repo — --cwd targets the right one.
+args=(worktree create --branch "$branch" "$focus" --json --cwd "$repo_root")
+[ -n "$base" ] && args+=(--base "$base")
+if [ -d "$parent/worktrees" ]; then
+  slug="${branch//\//-}"
+  args+=(--path "$parent/worktrees/$repo/$slug")
 fi
 
-build_args "$mode"
-out=$("$herdr_bin" "${args[@]}") || true
-
-# Defense in depth: if Herdr still rejects because the target resolved to a
-# linked-worktree workspace, retry once resolving the parent workspace by path.
-if [ "$mode" = "workspace" ] && printf '%s' "$out" | jq -e '.error.code=="linked_worktree_source"' >/dev/null 2>&1; then
-  build_args cwd
-  out=$("$herdr_bin" "${args[@]}") || true
-fi
-
-if ! path=$(printf '%s' "$out" | jq -er '.result.worktree.path'); then
+# herdr writes its result JSON to stdout on success and its error JSON to stderr
+# on failure — capture them separately so a failure surfaces the real error.
+err=$(mktemp)
+out=$("$herdr_bin" "${args[@]}" 2>"$err") || true
+if ! path=$(printf '%s' "$out" | jq -er '.result.worktree.path' 2>/dev/null); then
   echo "herdr worktree create failed:" >&2
-  printf '%s\n' "$out" >&2
+  cat "$err" >&2
+  [ -n "$out" ] && printf '%s\n' "$out" >&2
+  rm -f "$err"
   exit 1
 fi
+rm -f "$err"
 
 echo "$path"
