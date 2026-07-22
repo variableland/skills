@@ -62,6 +62,12 @@ fi
 
 fail() { echo "spawn.sh: $1" >&2; exit 1; }
 
+# Reap stale spawn prompt files from previous runs. Workers read their prompt
+# file shortly after launch, so files older than a day in the shared scratch dir
+# are safe to remove — this keeps the launcher's convention dir self-cleaning.
+spawn_scratch="${TMPDIR:-/tmp}/herdr-spawn"
+[ -d "$spawn_scratch" ] && find "$spawn_scratch" -maxdepth 1 -type f -name '*.md' -mtime +1 -delete 2>/dev/null || true
+
 # ---- resolve workspace id from worktree path --------------------------------
 # Herdr reports each worktree's open workspace id as `open_workspace_id`.
 ws=$(herdr worktree list --cwd "$worktree" --json 2>/dev/null \
@@ -90,11 +96,41 @@ agent_name=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z
 herdr pane wait-output "$agent_pane" --match '❯' --timeout 15000 >/dev/null \
   || fail "agent pane shell did not become ready"
 
-herdr agent start "$agent_name" --kind "$kind" --pane "$agent_pane" --timeout 30000 -- ${agent_args[@]+"${agent_args[@]}"} >/dev/null \
-  || fail "could not start '$kind' agent on pane $agent_pane"
-herdr agent wait "$agent_pane" --until idle --timeout 30000 >/dev/null 2>&1 || true
-herdr agent prompt "$agent_pane" "$(cat "$prompt_file")" >/dev/null \
-  || fail "could not submit prompt to the '$kind' worker"
+# Deliver the task as a BOOTSTRAP argv, not via `agent prompt`. The task is
+# received as the agent's initial launch argument (a one-line instruction that
+# points at the prompt file), so it cannot be lost the way keystrokes typed into
+# the TUI after startup can be — that race makes `agent prompt` report success
+# while the input box stays empty. The long prompt lives in the file; passing it
+# directly as argv is rejected by herdr ("arguments cannot be encoded safely").
+bootstrap="Read the file ${prompt_file} and do exactly what it says. That file is your complete task; begin now."
+
+# `agent start` can transiently return `agent_pane_busy` even after the shell
+# prompt rendered; retry a few times with a short backoff.
+start_err=$(mktemp) ; started=0
+for _attempt in 1 2 3 4 5; do
+  if herdr agent start "$agent_name" --kind "$kind" --pane "$agent_pane" --timeout 30000 \
+        -- ${agent_args[@]+"${agent_args[@]}"} "$bootstrap" >/dev/null 2>"$start_err"; then
+    started=1 ; break
+  fi
+  grep -q agent_pane_busy "$start_err" 2>/dev/null || break   # different error -> stop retrying
+  sleep 2
+done
+if [ "$started" -ne 1 ]; then
+  echo "spawn.sh: could not start '$kind' agent on pane $agent_pane" >&2
+  cat "$start_err" >&2 ; rm -f "$start_err" ; exit 1
+fi
+rm -f "$start_err"
+
+# Verify the worker actually began the task — do not trust that `agent start`
+# delivered the prompt. If it never leaves idle, re-deliver once via agent prompt;
+# if it still won't start, fail loudly instead of reporting a launched-but-dead
+# worker. (Valid agent states: idle, working, blocked, done, unknown.)
+active=(--until working --until blocked --until done)
+if ! herdr agent wait "$agent_pane" "${active[@]}" --timeout 30000 >/dev/null 2>&1; then
+  herdr agent prompt "$agent_pane" "$bootstrap" >/dev/null 2>&1 || true
+  herdr agent wait "$agent_pane" "${active[@]}" --timeout 30000 >/dev/null 2>&1 \
+    || fail "worker started but never began the task (prompt not received) - pane $agent_pane"
+fi
 
 # ---- git tab AFTER: rename the default tab -> git, run lazygit --------------
 herdr tab rename "$git_tab" git >/dev/null || fail "could not rename default tab to 'git'"

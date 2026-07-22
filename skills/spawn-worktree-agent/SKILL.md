@@ -40,7 +40,14 @@ there with a specialized prompt, and reports. The real work happens in the worke
 
 ## Step 2: Compose the worker prompt
 
-Write the prompt to a temp file: `prompt_file=$(mktemp)`. Include, in the user's language:
+Write the prompt to a readably-named file in the spawn scratch dir (so it's easy to find, and `spawn.sh` auto-cleans it later):
+
+```bash
+spawn_dir="${TMPDIR:-/tmp}/herdr-spawn"; mkdir -p "$spawn_dir"
+prompt_file=$(mktemp "$spawn_dir/<branch-slug>-XXXXXX.md")   # <branch-slug> = the branch with / turned into -
+```
+
+The path is absolute, so a cross-repo worker reads it regardless of its working directory. Include, in the user's language:
 
 1. The task exactly as the user described it.
 2. Context: repo name, the branch, and "You are in an isolated git worktree on branch
@@ -61,7 +68,7 @@ Follow the `herdr-worktree` skill: read its SKILL.md and run its `scripts/create
 
 Do NOT substitute a bare `git worktree add` — Herdr's sidebar cannot see worktrees created that way.
 
-**Nested spawning is supported.** If you are already inside a linked worktree (a spawned worker spawning another worker), `herdr-worktree`'s `create.sh` targets the repo's parent workspace automatically — worktree creation just works. Do not work around it by unsetting `HERDR_WORKSPACE_ID` or falling back to `git worktree add`.
+**Nested and cross-repo spawning are supported.** `herdr-worktree`'s `create.sh` always resolves the target repo's parent workspace by path, so it works whether you are inside a linked worktree (a worker spawning another worker) or targeting a **different repo** than the current session's. For a cross-repo spawn, run `create.sh` with the **target repo as the working directory** (e.g. `cd <other-repo> && bash <herdr-worktree>/scripts/create.sh <branch> --base origin/main`) so it resolves that repo, not the session's. Do not work around any of this by unsetting `HERDR_WORKSPACE_ID` or falling back to `git worktree add`.
 
 ## Step 4: Set up tabs and launch the worker
 
@@ -70,7 +77,7 @@ bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file 
 bash <skill-dir>/scripts/spawn.sh --worktree "<path-from-step-3>" --prompt-file "$prompt_file" --kind <other-kind> --agent-arg <autonomous-flag>
 ```
 
-It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind` and given the task via `agent prompt`) — moves Herdr focus to the worker tab, and prints a one-line JSON result. When no `--agent-arg` is given it defaults the worker's autonomous flag by kind: `claude` → `--dangerously-skip-permissions`, `opencode` → `--auto`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
+It sets up two tabs in the worktree's workspace — `git` (running lazygit) and one named after the kind (hosting the worker, started with `agent start --kind`, with the task delivered as the worker's **launch argument** — a one-line instruction to read the prompt file — so it can't be lost the way text typed into the TUI after startup can). It then **verifies the worker actually begins the task** before reporting success; if the worker never starts, spawn.sh fails loudly instead of reporting a launched-but-dead worker. It moves Herdr focus to the worker tab and prints a one-line JSON result. When no `--agent-arg` is given it defaults the worker's autonomous flag by kind: `claude` → `--dangerously-skip-permissions`, `opencode` → `--auto`; for other kinds pass the agent's autonomous flag(s) via `--agent-arg` (repeatable). Add `--no-focus` if the user asked not to switch focus, or when spawning several workers in one turn so Herdr focus doesn't bounce between them.
 
 ## Step 5: Report
 
@@ -84,7 +91,7 @@ Parse the JSON and tell the user, e.g.:
 If any step failed, report which step and the error. If the worktree was created but
 tab setup failed, say so — it still exists in the sidebar; the user can retry or remove it.
 
-After reporting, remove the temp prompt file: `rm -f "$prompt_file"`.
+Leave the prompt file in place — the worker reads it *after* launch (and may re-read it while working), so do NOT delete it when the launcher finishes. It lives in `${TMPDIR:-/tmp}/herdr-spawn/` with a readable name; `spawn.sh` auto-reaps files older than a day there on each run, and `rm -f "${TMPDIR:-/tmp}/herdr-spawn/"*.md` clears them all.
 
 ## Cleanup (when the worker's work is done and merged)
 
