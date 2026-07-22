@@ -2,6 +2,11 @@
 # End-to-end test for spawn.sh. Requires running inside Herdr (>=0.7.5). Creates
 # and removes a throwaway worktree; launches a REAL claude worker with a no-op
 # prompt (torn down immediately). lazygit is stubbed to echo.
+#
+# spawn.sh now delivers the task as the worker's launch argument and verifies the
+# worker actually begins processing before returning success. So spawn.sh exiting
+# 0 (asserted below) also guards against the silent-failure mode where a worker is
+# "launched" but sits at an empty prompt.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 spawn="$here/spawn.sh"
