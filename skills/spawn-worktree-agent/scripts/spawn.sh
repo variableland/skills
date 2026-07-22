@@ -62,6 +62,19 @@ fi
 
 fail() { echo "spawn.sh: $1" >&2; exit 1; }
 
+# On failure, tear down what this run created: close the agent tab (and with it
+# any half-started agent) unless the worker was already confirmed working, so a
+# failed run never leaves an orphaned tab behind. Also reap scratch files.
+agent_tab="" ; worker_ok=0 ; start_err=""
+cleanup() {
+  status=$?
+  [ -n "$start_err" ] && rm -f "$start_err"
+  if [ "$status" -ne 0 ] && [ -n "$agent_tab" ] && [ "$worker_ok" -ne 1 ]; then
+    herdr tab close "$agent_tab" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 # Reap stale spawn prompt files from previous runs. Workers read their prompt
 # file shortly after launch, so files older than a day in the shared scratch dir
 # are safe to remove — this keeps the launcher's convention dir self-cleaning.
@@ -70,19 +83,24 @@ spawn_scratch="${TMPDIR:-/tmp}/herdr-spawn"
 
 # ---- resolve workspace id from worktree path --------------------------------
 # Herdr reports each worktree's open workspace id as `open_workspace_id`.
-ws=$(herdr worktree list --cwd "$worktree" --json 2>/dev/null \
+ws=$(herdr worktree list --cwd "$worktree" --json \
       | jq -er --arg p "$worktree" 'first(.result.worktrees[] | select(.path==$p) | .open_workspace_id)') \
   || fail "could not resolve workspace id for worktree: $worktree (registered in Herdr?)"
-[ -n "$ws" ] && [ "$ws" != "null" ] || fail "worktree has no open workspace: $worktree"
 
-# ---- resolve the default (git) tab up front ---------------------------------
-git_tab=$(herdr tab list --workspace "$ws" | jq -er '.result.tabs[0].tab_id') \
+# ---- resolve the pre-existing (git) tab up front -----------------------------
+# Pick the tab with the lowest `number` (assigned at creation, never changes),
+# not `.tabs[0]`: the list is positional and a `tab move` can reorder it.
+git_tab=$(herdr tab list --workspace "$ws" \
+      | jq -er '.result.tabs | sort_by(.number) | .[0].tab_id') \
   || fail "could not resolve default tab of workspace $ws"
 
-# ---- agent tab FIRST: create it, start the agent, submit the prompt ---------
-# ORDER MATTERS: herdr 0.7.5 returns `agent_pane_busy` from `agent start` when a
-# `pane run` was issued on a sibling pane just before it. So start the agent
-# BEFORE running lazygit in the git pane. (Verified against the live server.)
+# ---- agent tab FIRST: create it, start the agent -----------------------------
+# Start the agent before touching the git tab. Per herdr's source, the
+# `agent_pane_busy` check inspects only the TARGET pane (an agent already there,
+# or its shell not yet an available foreground process — a startup race that can
+# persist briefly even after the prompt renders); a `pane run` on a sibling pane
+# cannot cause it. The readiness wait plus the retry loop below are the real
+# guards; agent-first ordering is kept as a conservative default.
 create_out=$(herdr tab create --workspace "$ws" --cwd "$worktree" --label "$kind" --no-focus) \
   || fail "could not create agent tab"
 agent_tab=$(printf '%s' "$create_out"  | jq -er '.result.tab.tab_id')        || fail "no tab_id in tab create output"
@@ -92,9 +110,10 @@ agent_pane=$(printf '%s' "$create_out" | jq -er '.result.root_pane.pane_id') || 
 agent_name=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^[^a-z]+//' | cut -c1-32)
 [ -n "$agent_name" ] || agent_name="worker"
 
-# Wait for the pane's shell to be ready; `agent start` rejects a not-yet-ready pane.
-herdr pane wait-output "$agent_pane" --match '❯' --timeout 15000 >/dev/null \
-  || fail "agent pane shell did not become ready"
+# Give the pane's shell a chance to come up. Best-effort: the prompt glyph is
+# theme-dependent, so a miss must not hard-fail the run — `agent start`'s own
+# busy check plus the retry loop below are the authoritative gate.
+herdr pane wait-output "$agent_pane" --match '❯' --timeout 15000 >/dev/null 2>&1 || true
 
 # Deliver the task as a BOOTSTRAP argv, not via `agent prompt`. The task is
 # received as the agent's initial launch argument (a one-line instruction that
@@ -122,23 +141,40 @@ fi
 rm -f "$start_err"
 
 # Verify the worker actually began the task — do not trust that `agent start`
-# delivered the prompt. If it never leaves idle, re-deliver once via agent prompt;
-# if it still won't start, fail loudly instead of reporting a launched-but-dead
-# worker. (Valid agent states: idle, working, blocked, done, unknown.)
+# delivered the prompt. Baseline the agent's state counter first: a task can
+# finish so fast the agent is back to idle before `agent wait` polls, and an
+# advanced state_change_seq proves the worker ran — without that check we would
+# re-deliver and run the task twice. If it truly never leaves idle, re-deliver
+# once via agent prompt; if it still won't start, fail loudly instead of
+# reporting a launched-but-dead worker. (States: idle/working/blocked/done/unknown.)
+agent_seq() { herdr agent get "$agent_pane" 2>/dev/null | jq -r '.result.agent.state_change_seq // 0' 2>/dev/null || true; }
+seq0=$(agent_seq); seq0=${seq0:-0}
 active=(--until working --until blocked --until done)
-if ! herdr agent wait "$agent_pane" "${active[@]}" --timeout 30000 >/dev/null 2>&1; then
+worker_active() {
+  herdr agent wait "$agent_pane" "${active[@]}" --timeout 30000 >/dev/null 2>&1 && return 0
+  seq1=$(agent_seq); seq1=${seq1:-0}
+  [ "$seq1" -gt "$seq0" ]
+}
+if ! worker_active; then
   herdr agent prompt "$agent_pane" "$bootstrap" >/dev/null 2>&1 || true
-  herdr agent wait "$agent_pane" "${active[@]}" --timeout 30000 >/dev/null 2>&1 \
-    || fail "worker started but never began the task (prompt not received) - pane $agent_pane"
+  worker_active || fail "worker started but never began the task (prompt not received) - pane $agent_pane"
 fi
+worker_ok=1
 
-# ---- git tab AFTER: rename the default tab -> git, run lazygit --------------
-herdr tab rename "$git_tab" git >/dev/null || fail "could not rename default tab to 'git'"
-git_pane=$(herdr pane list --workspace "$ws" \
-      | jq -er --arg t "$git_tab" 'first(.result.panes[] | select(.tab_id==$t) | .pane_id)') \
-  || fail "could not resolve pane of git tab"
-herdr pane wait-output "$git_pane" --match '❯' --timeout 10000 >/dev/null 2>&1 || true
-herdr pane run "$git_pane" "$lazygit_bin" >/dev/null || fail "could not launch lazygit in git tab"
+# ---- git tab AFTER (best-effort): rename default tab -> git, run lazygit ----
+# The worker is already confirmed; the git tab is convenience. A failure here
+# must not turn a successful delegation into a reported failure — record it in
+# the JSON (git_tab_ready) instead of aborting. The readiness wait now GATES the
+# lazygit launch: `pane run` is keystroke injection with no shell-idle check of
+# its own, so typing into a not-ready pane would silently lose the command.
+git_ready=false
+if herdr tab rename "$git_tab" git >/dev/null 2>&1 \
+   && git_pane=$(herdr pane list --workspace "$ws" \
+        | jq -er --arg t "$git_tab" 'first(.result.panes[] | select(.tab_id==$t) | .pane_id)' 2>/dev/null) \
+   && herdr pane wait-output "$git_pane" --match '❯' --timeout 10000 >/dev/null 2>&1 \
+   && herdr pane run "$git_pane" "$lazygit_bin" >/dev/null 2>&1; then
+  git_ready=true
+fi
 
 # ---- focus ------------------------------------------------------------------
 if [ "$focus" -eq 1 ]; then
@@ -149,5 +185,7 @@ fi
 # ---- structured result ------------------------------------------------------
 jq -nc --arg worktree "$worktree" --arg ws "$ws" --arg git_tab "$git_tab" \
        --arg agent_tab "$agent_tab" --arg kind "$kind" --arg agent "$agent_name" \
+       --argjson git_ready "$git_ready" \
   '{ok:true, worktree:$worktree, workspace_id:$ws, kind:$kind, agent:$agent,
-    tabs:({git:$git_tab} + {($kind):$agent_tab}), worker_launched:true}'
+    tabs:({git:$git_tab} + {($kind):$agent_tab}), git_tab_ready:$git_ready,
+    worker_launched:true}'
