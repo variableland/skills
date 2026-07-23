@@ -1,6 +1,6 @@
 ---
 name: spawn-worktree-agent
-description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch — including for a repo other than the current session''s ("spawn a worker for repo X", "delegá esto en el otro repo"). Not for ordinary same-session delegation (subagents/background tasks that need no new worktree). Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed.'
+description: 'Delegate a problem or investigation to an autonomous coding-agent worker running in an isolated Herdr worktree, instead of solving it in the current session. The worker is Claude by default but can be any Herdr agent kind (opencode, codex, gemini, ...). Use when the user wants to "spin off", "delegate", "arrancá un worktree para", "resolvé esto en un worktree aparte", or hand a task to a fresh agent in its own branch — including for a repo other than the current session''s ("spawn a worker for repo X", "delegá esto en el otro repo"). Not for ordinary same-session delegation (subagents/background tasks that need no new worktree). After launching, the launcher stays on duty: it arms watchers, opens the PR when the worker commits, and merges once CI is green and the PR is approved. Requires running inside Herdr (HERDR_ENV=1), herdr >= 0.7.5, and the herdr-worktree skill installed.'
 ---
 
 # Spawn Worktree Agent
@@ -8,6 +8,12 @@ description: 'Delegate a problem or investigation to an autonomous coding-agent 
 This skill turns the current session into a **launcher**: it does NOT solve the
 problem itself. It creates an isolated worktree, starts an autonomous worker
 there with a specialized prompt, and reports. The real work happens in the worker.
+
+Launching is not the end of the launcher's job: after reporting, it **arms
+watchers** (Step 6) and stays on duty to deliver — when the worker finishes it
+opens the PR (resolve) or finds the worker's PR (resolve-full), watches it, and
+merges it once CI is green **and** a reviewer approved. The launcher owns
+delivery; the worker owns code.
 
 ## Prerequisites (check first; stop with a clear message if unmet)
 
@@ -22,10 +28,13 @@ there with a specialized prompt, and reports. The real work happens in the worke
 
 ## Step 1: Classify intent, agent kind, and branch
 
-- Intent: **resolve** (implement/fix; stops at a local commit — no PR), **resolve-full**
-  (end-to-end: commit, push, open PR(s), watch CI — pick it only when the user or a
-  calling skill explicitly asks for full delivery), or **investigate** (research, no
-  code changes).
+- Intent: **resolve** (implement/fix; the WORKER stops at a local commit — the
+  launcher then pushes, opens the PR, and merges it via the Step 6 watchers),
+  **resolve-full** (the worker itself commits, pushes, opens PR(s), and watches CI —
+  pick it only when the user or a calling skill explicitly asks for it; the launcher
+  still watches and merges per Step 6), or **investigate** (research, no code changes).
+  If the user asked to stop at the local commit ("solo commit local", "no PR"), use
+  resolve but skip Step 6's PR stage — arm only the worker watcher and report.
 - Agent kind: default `claude`. If the user asks for another (e.g. "usá opencode"),
   use that as `--kind` (valid kinds: claude, opencode, codex, gemini, cursor, ...).
 - **Autonomous flag:** spawn.sh applies a default autonomous flag for known kinds
@@ -102,12 +111,13 @@ It sets up two tabs in the worktree's workspace — `git` (running lazygit) and 
 
 ## Step 5: Report
 
-Compose the report **in the user's language** from the JSON **plus what you already know**. The JSON carries `worktree`, `workspace_id`, `kind`, `agent`, `tabs`, `git_tab_ready`, `worker_launched` — it does **NOT** carry the branch; use the branch you chose in Step 1. E.g. (adapt the wording to the user's language):
+Compose the report **in the user's language** from the JSON **plus what you already know**. The JSON carries `worktree`, `workspace_id`, `kind`, `agent`, `agent_pane`, `tabs`, `git_tab_ready`, `worker_launched` — it does **NOT** carry the branch; use the branch you chose in Step 1. E.g. (adapt the wording to the user's language):
 
     Worktree ready: <path>  (branch <branch-from-Step-1>, workspace <workspace_id>, agent <kind>)
       git tab    → lazygit
       <kind> tab → <kind> (autonomous) — worker launched and verified
     Focus moved to the worktree.
+    Watching the worker — when it commits I'll open the PR and merge it once it's green + approved.
 
 Adjust to reality: mention the focus move only if you did not pass `--no-focus`; if `git_tab_ready` is `false`, say the git tab setup failed but the worker is running fine (the user can open lazygit by hand).
 
@@ -116,9 +126,97 @@ tab setup failed, say so — it still exists in the sidebar; the user can retry 
 
 Leave the prompt file in place — the worker reads it *after* launch (and may re-read it while working), so do NOT delete it when the launcher finishes. It lives in `${TMPDIR:-/tmp}/herdr-spawn/` with a readable name; `spawn.sh` auto-reaps files older than a day there on each run, and `rm -f "${TMPDIR:-/tmp}/herdr-spawn/"*.md` clears them all.
 
+## Step 6: Arm the delivery watchers (default — skip only if the user opted out)
+
+The launcher does not poll by hand and does not end its duty at the report: it
+arms **event watchers** that wake the session when something decisive happens.
+Run each watcher script under the session's non-blocking watch primitive — in
+Claude Code that is the **Monitor tool with `persistent: true`** (each stdout
+line becomes a notification; these waits can take hours, so never use a
+foreground Bash call, and prefer Monitor over background Bash because background
+tasks may be time-capped). The watchers live only as long as the launcher
+session — if the session is about to end, hand off explicitly: tell the user
+which stage remains and what event triggers it.
+
+### 6a. Worker watcher (all intents)
+
+Immediately after a successful Step 4 launch:
+
+```bash
+bash <skill-dir>/scripts/watch-worker.sh --agent <agent_pane-from-JSON> --worktree <worktree>
+```
+
+It blocks on `herdr agent wait` until the worker settles (with a settle window
+that filters transient idle blips between worker turns), then emits ONE line and
+exits. On wake, act by event and intent:
+
+- `WORKER_SETTLED` + **investigate** → read the findings from the pane
+  (`herdr agent read <agent>`), relay them to the user. Done.
+- `WORKER_SETTLED` + **resolve** → in the worktree, verify `dirty=no` and
+  `commits_ahead>=1` (both are on the event line). Push the branch
+  (`git -C <worktree> push -u origin <branch>`), open the PR with `gh pr create`
+  (use the calling skill's PR template if one governs the run, else the repo's
+  convention), tell the user, then arm 6b.
+- `WORKER_SETTLED` + **resolve-full** → the worker opened the PR itself: find it
+  with `gh pr list --head <branch> --json number,url`, then arm 6b.
+- `WORKER_SETTLED` but the tree is dirty or has no commits → the worker stopped
+  short. Read its pane to see why; re-prompt it once
+  (`herdr agent prompt <agent> "<what's missing>"`), then re-arm 6a. If it
+  settles short again, surface to the user instead of looping.
+- `WORKER_BLOCKED` → the worker is stuck on a prompt. Read the pane; if it's
+  waiting on a trivial confirmation, answer via `herdr agent prompt` /
+  `herdr agent send-keys`; otherwise surface to the user.
+- `WORKER_GONE` / `WORKER_UNKNOWN` → inspect the workspace and report; do not
+  silently re-arm.
+
+### 6b. PR watcher (resolve / resolve-full)
+
+```bash
+bash <skill-dir>/scripts/watch-pr.sh --pr <number> --repo <owner/name> [--interval 30]
+```
+
+It polls `gh pr view` and emits one line per decisive event. On wake:
+
+- `READY_TO_MERGE` (all checks green AND `reviewDecision: APPROVED`) → **merge it
+  yourself**: `gh pr merge <n> --squash` (match the repo's allowed merge method —
+  `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`).
+  The human gate is the review approval; never weaken it — no `--admin`, no
+  merging on green-but-unapproved, no self-approving.
+- `GREEN_AWAITING_REVIEW` (informative; the watcher keeps running) → tell the
+  user their approval is the only thing missing, with the PR URL.
+- `CHECKS_FAILED` → the worker's tab is still alive. Re-prompt it with the
+  failing check names and the failure output
+  (`herdr agent prompt <agent> "CI failed: <details>. Fix and push."`), then
+  re-arm 6a (worker) and, once it settles, 6b again. If the failure is clearly
+  environmental/flaky, say so to the user instead.
+- `CHANGES_REQUESTED` → read the review comments (`gh pr view <n> --comments`,
+  `gh api` for review threads), relay them to the worker via `herdr agent
+  prompt`, re-arm 6a then 6b.
+- `PR_CLOSED` → stop; report to the user.
+- `PR_MERGED` (merged by someone else, or right after your own merge) → close out:
+  run the Cleanup below, then report which PR merged and what was cleaned up.
+
+### Close-out after merge
+
+1. Confirm `mergedAt` is non-null (`gh pr view <n> --json mergedAt,state`).
+2. Remove the worktree per **Cleanup** below — this also closes the worker's
+   workspace and tabs, so only do it after the merge.
+3. Delete the local branch from the main checkout
+   (`git branch -d <branch>`; the remote branch is auto-deleted when the repo
+   has `deleteBranchOnMerge`, otherwise `git push origin --delete <branch>`).
+4. Report: PR URL, merged, worktree removed, branch deleted.
+
 ## Cleanup (when the worker's work is done and merged)
 
 ```bash
 herdr worktree list --cwd <repo-root> --json   # find .open_workspace_id
-herdr worktree remove --workspace <id>
+herdr worktree remove --workspace <id> --force
 ```
+
+Use `--force`: a worker that installed dependencies or ran builds leaves ignored
+files (node_modules, artifacts) in the worktree, and without it the remove fails
+with "Directory not empty" — worse, the failed attempt can leave a half-removed
+state (git registration gone, orphan directory, workspace closed). Verify tracked
+files are clean/merged before forcing. If a previous non-force attempt already
+half-removed it, finish by hand: `rm -rf <worktree-path>` then
+`git -C <repo-root> worktree prune`.

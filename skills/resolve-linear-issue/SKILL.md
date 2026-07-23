@@ -99,7 +99,10 @@ The branch must follow the `<type>/linear-<issue-id>` convention (e.g. `fix/line
    - Instructions to execute Steps 5–9 of this skill: implement the plan (matching the design details folded into it), run lint → typecheck → tests until green (Step 6), commit using the plan's PR prefix (Step 7), open the PR(s) per the Step 8 template and sub-issue strategy, and watch CI until green, fixing failures (Step 9).
    - "Do NOT update Linear and do NOT wait for the merge — the launcher session owns issue state and close-out."
 5. Spawn a **single worker** for the whole run, sub-issues included; the worker applies the sub-issue PR strategy (Step 8) from inside its worktree, creating additional branches there if the independent-scopes strategy calls for them.
-6. **Keep ownership of Linear state after launching.** Watch for the PR(s) on the worker's branch(es) — `gh pr list --head <branch> --json number,url,title` — using whatever non-blocking mechanism the session offers (background polling, a monitor tool, scheduled wakeups). When a PR opens: apply Step 8's state changes from this session (In Review + attach the PR link to the covered issues). When it merges (`gh pr view <n> --json mergedAt`): apply Step 10 (Done). If this session must end before then, hand off explicitly — tell the user exactly which state changes remain and what event triggers each.
+6. **Arm the delivery watchers and keep ownership of Linear state.** Follow `spawn-worktree-agent`'s Step 6 — its `scripts/watch-worker.sh` and `scripts/watch-pr.sh`, each run under the session's persistent non-blocking watch primitive (in Claude Code: the Monitor tool with `persistent: true`; these waits can take hours):
+   - `watch-worker.sh --agent <agent_pane-from-spawn-JSON> --worktree <worktree>` fires when the worker settles. Find its PR(s) — `gh pr list --head <branch> --json number,url,title` (under resolve-full the worker opens them itself). Apply Step 8's Linear state changes from this session (In Review + attach the PR link to the covered issues), then arm `watch-pr.sh --pr <n> --repo <owner/name>` for each PR.
+   - On `GREEN_AWAITING_REVIEW`: tell the user the PR is green and only their approval is missing. On `READY_TO_MERGE` (all checks green AND `reviewDecision: APPROVED`): **merge it yourself** — `gh pr merge <n> --squash` (match the repo's allowed merge method). The review approval is the human gate; never bypass it. On `CHECKS_FAILED` / `CHANGES_REQUESTED`: relay the failing checks or review comments to the worker via `herdr agent prompt` and re-arm both watchers. On `PR_MERGED`: apply Step 10 (Done) and clean up the worktree per `spawn-worktree-agent`'s Cleanup.
+   - If this session must end before delivery completes, hand off explicitly — tell the user exactly which state changes remain and what event triggers each.
 7. Report per `spawn-worktree-agent`'s Step 5, plus the Linear state change already made and how the PR watch from item 6 will run. Implementation (Steps 5–9) happens in the worker, not in this session.
 
 ### In-session mode — everywhere else
@@ -228,7 +231,7 @@ Or check periodically with:
 gh pr view <pr-number> --json statusCheckRollup
 ```
 
-- If all checks pass → tell the user the PR is green and ready to merge.
+- If all checks pass → check `reviewDecision` (`gh pr view <n> --json reviewDecision`): if `APPROVED`, **merge it yourself** with `gh pr merge <n> --squash` (match the repo's allowed merge method) and continue to Step 10; otherwise tell the user the PR is green and awaiting their approval, and keep watching for it (with `spawn-worktree-agent`'s `scripts/watch-pr.sh` under a persistent monitor when that skill is installed, else periodic `gh pr view`). The review approval is the human gate — never merge without it and never use `--admin`.
 - If a check fails → read the failure output, attempt to fix it, push a new commit, and re-check. If the failure is outside your control (e.g., a flaky test or external service), surface it clearly to the user.
 
 Do not mark the issue as Done until the PR is actually merged.
