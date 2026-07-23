@@ -185,7 +185,7 @@ fi
 # ---- structured result ------------------------------------------------------
 jq -nc --arg worktree "$worktree" --arg ws "$ws" --arg git_tab "$git_tab" \
        --arg agent_tab "$agent_tab" --arg kind "$kind" --arg agent "$agent_name" \
-       --argjson git_ready "$git_ready" \
+       --arg agent_pane "$agent_pane" --argjson git_ready "$git_ready" \
   '{ok:true, worktree:$worktree, workspace_id:$ws, kind:$kind, agent:$agent,
-    tabs:({git:$git_tab} + {($kind):$agent_tab}), git_tab_ready:$git_ready,
-    worker_launched:true}'
+    agent_pane:$agent_pane, tabs:({git:$git_tab} + {($kind):$agent_tab}),
+    git_tab_ready:$git_ready, worker_launched:true}'
