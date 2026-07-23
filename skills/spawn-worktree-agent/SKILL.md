@@ -22,7 +22,10 @@ there with a specialized prompt, and reports. The real work happens in the worke
 
 ## Step 1: Classify intent, agent kind, and branch
 
-- Intent: **resolve** (implement/fix) or **investigate** (research, no code changes).
+- Intent: **resolve** (implement/fix; stops at a local commit — no PR), **resolve-full**
+  (end-to-end: commit, push, open PR(s), watch CI — pick it only when the user or a
+  calling skill explicitly asks for full delivery), or **investigate** (research, no
+  code changes).
 - Agent kind: default `claude`. If the user asks for another (e.g. "usá opencode"),
   use that as `--kind` (valid kinds: claude, opencode, codex, gemini, cursor, ...).
 - **Autonomous flag:** spawn.sh applies a default autonomous flag for known kinds
@@ -35,8 +38,8 @@ there with a specialized prompt, and reports. The real work happens in the worke
   `--agent-arg <flag>` — otherwise the worker stalls at its own permission prompt. If
   you do not know the agent's autonomous flag, ASK THE USER before launching; do not
   launch a worker of an unknown kind without one.
-- Branch `<type>/<slug>`: type `feat`/`fix` (resolve) or `investigate`; slug = short
-  kebab-case summary. Use an explicit name if the user gave one.
+- Branch `<type>/<slug>`: type `feat`/`fix` (resolve / resolve-full) or `investigate`;
+  slug = short kebab-case summary. Use an explicit name if the user gave one.
 
 ## Step 2: Compose the worker prompt
 
@@ -44,8 +47,14 @@ Write the prompt to a readably-named file in the spawn scratch dir (so it's easy
 
 ```bash
 spawn_dir="${TMPDIR:-/tmp}/herdr-spawn"; mkdir -p "$spawn_dir"
-prompt_file=$(mktemp "$spawn_dir/<branch-slug>-XXXXXX.md")   # <branch-slug> = the branch with / turned into -
+prompt_file="$spawn_dir/<branch-slug>-$(date +%s).md"   # <branch-slug> = the branch with / turned into -
 ```
+
+Do NOT reach for `mktemp` here: BSD/macOS `mktemp` requires the `X`s to be the template's
+trailing characters, so a template ending in `.md` gets created *literally* (no unique
+suffix) — and pre-creating an empty file also forces overwrite-guarded write tools into a
+pointless read-before-write step. Compose the content and write it to `$prompt_file` in
+one go; the timestamp keeps re-spawns of the same branch from colliding.
 
 The path is absolute, so a cross-repo worker reads it regardless of its working directory. Include, in the user's language:
 
@@ -56,15 +65,27 @@ The path is absolute, so a cross-repo worker reads it regardless of its working 
    - **resolve:** "Implement the change. Run the project's tests and make them pass.
      Commit your work on this branch with a conventional-commit message. Do NOT open
      a pull request — leave that to the user."
+   - **resolve-full:** "Implement the change. Run the project's checks and tests until
+     everything is green. Commit on this branch with a conventional-commit message,
+     push the branch, and open the PR(s) with `gh`. Watch CI and fix failures until
+     the PR is green. Do NOT merge, and do NOT update any issue tracker — the launcher
+     session owns those — unless this prompt explicitly says otherwise."
    - **investigate:** "Investigate and produce findings. Do NOT modify code or commit.
      Summarize what you found, where, and your recommendation."
 4. "When you finish, print a short summary of what you did."
 
 The prompt must be self-contained — the worker starts with zero conversation history.
 
+If a plan or spec file governs the task and lives somewhere gitignored (e.g. `.plans/`),
+do not paste its contents into the prompt: reference it as a path relative to the
+worker's working directory, and copy the file into the worktree after Step 3 creates it
+(see there). One pointer beats an inline copy that can drift.
+
 ## Step 3: Create the worktree (via the herdr-worktree skill)
 
 Follow the `herdr-worktree` skill: read its SKILL.md and run its `scripts/create.sh <branch> [--base <ref>]` exactly as documented there. Capture the absolute worktree path it prints (its last output line).
+
+If the prompt references gitignored plan/spec files (see Step 2), copy them into the same relative location inside the worktree now (e.g. `mkdir -p <worktree>/.plans && cp .plans/<issue>.md <worktree>/.plans/`) — gitignored files are not part of the checkout, and once copied they remain ignored, so the worker cannot accidentally commit them.
 
 Do NOT substitute a bare `git worktree add` — Herdr's sidebar cannot see worktrees created that way.
 
@@ -81,14 +102,14 @@ It sets up two tabs in the worktree's workspace — `git` (running lazygit) and 
 
 ## Step 5: Report
 
-Compose the report from the JSON **plus what you already know**. The JSON carries `worktree`, `workspace_id`, `kind`, `agent`, `tabs`, `git_tab_ready`, `worker_launched` — it does **NOT** carry the branch; use the branch you chose in Step 1. E.g.:
+Compose the report **in the user's language** from the JSON **plus what you already know**. The JSON carries `worktree`, `workspace_id`, `kind`, `agent`, `tabs`, `git_tab_ready`, `worker_launched` — it does **NOT** carry the branch; use the branch you chose in Step 1. E.g. (adapt the wording to the user's language):
 
-    Worktree listo: <path>  (branch <branch-from-Step-1>, workspace <workspace_id>, agente <kind>)
-      tab git    → lazygit
-      tab <kind> → <kind> (autónomo) — worker lanzado y verificado
-    Foco movido al worktree.
+    Worktree ready: <path>  (branch <branch-from-Step-1>, workspace <workspace_id>, agent <kind>)
+      git tab    → lazygit
+      <kind> tab → <kind> (autonomous) — worker launched and verified
+    Focus moved to the worktree.
 
-Adjust to reality: say "Foco movido" only if you did not pass `--no-focus`; if `git_tab_ready` is `false`, say the git tab setup failed but the worker is running fine (the user can open lazygit by hand).
+Adjust to reality: mention the focus move only if you did not pass `--no-focus`; if `git_tab_ready` is `false`, say the git tab setup failed but the worker is running fine (the user can open lazygit by hand).
 
 If any step failed, report which step and the error. If the worktree was created but
 tab setup failed, say so — it still exists in the sidebar; the user can retry or remove it.

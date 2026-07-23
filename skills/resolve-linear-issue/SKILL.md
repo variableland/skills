@@ -72,13 +72,11 @@ Then look for `.plans/<ISSUE-ID>.md` at the workspace root.
 
 Cross-check the plan's `## Sub-issues` section against the live list from the hierarchy check: sub-issues may have been created or closed after the plan was written, and the live list wins.
 
-**If the plan file does not exist**, generate the plan inline before continuing — do not stop and do not ask the user. Follow the full planning flow from the `plan-linear-issue` skill:
+**If the plan file does not exist**, generate it now — do not stop and do not ask the user. Load the actual `plan-linear-issue` skill (via the Skill tool) instead of working from memory of its flow, and follow it with these adjustments:
 
-1. Read project conventions (`AGENTS.md`, `docs/conventions/`, etc.)
-2. Follow any GitHub permalinks in the issue description
-3. Search the codebase for files related to the issue's scope
-4. Write the plan to `.plans/<ISSUE-ID>.md` (creating the directory and updating `.gitignore` if needed)
-5. Tell the user: "No plan found — generated one at `.plans/<ISSUE-ID>.md`. Continuing with implementation."
+- Skip its Steps 0–2 — connectivity, workspace state, and the issue fetch + hierarchy check are already done above; reuse those results.
+- Run its Steps 3–6 as written: explore the codebase, generate the plan, do the complexity check (creating sub-issues when warranted), and write `.plans/<ISSUE-ID>.md`.
+- Skip its Step 7 report; instead tell the user: "No plan found — generated one at `.plans/<ISSUE-ID>.md`. Continuing with implementation."
 
 Then continue with Step 3 using the plan just generated.
 
@@ -90,17 +88,19 @@ The branch must follow the `<type>/linear-<issue-id>` convention (e.g. `fix/line
 
 ### Delegated mode — inside Herdr
 
-**If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `spawn-worktree-agent` skill is available, do NOT implement in this session: delegate the implementation to an autonomous worker in an isolated worktree. This session only prepares the launch and reports.
+**If running inside Herdr** (`HERDR_ENV` is set in the environment) and the `spawn-worktree-agent` skill is available, do NOT implement in this session: delegate the implementation to an autonomous worker in an isolated worktree. The division of labor is fixed: the **worker owns the code** (Steps 5–9 — implement, verify, commit, PR, CI), and **this session owns Linear state throughout** — worker sessions usually cannot reach the Linear MCP (its auth is interactive), so never delegate issue-state changes to the worker.
 
-1. Complete Step 4 (move the issue to In Progress) from this session **before** launching — the worker session may not have the Linear MCP available.
-2. Follow the `spawn-worktree-agent` skill with intent **resolve**, the branch name above as the explicit branch name, and the default agent kind unless the user asked for another. (It uses `herdr-worktree` internally to create the worktree.)
-3. Compose the worker prompt per that skill's Step 2, with one deliberate override: its default resolve prompt forbids opening a PR, but this skill's contract is end-to-end, so instruct the worker to open the PR and follow through. The prompt file must contain:
+1. Complete Step 4 (move the issue to In Progress) from this session **before** launching.
+2. Follow the `spawn-worktree-agent` skill with intent **resolve-full** (its end-to-end mode: commit, push, open PR(s), watch CI — no override needed), the branch name above as the explicit branch name, and the default agent kind unless the user asked for another. (It uses `herdr-worktree` internally to create the worktree.)
+3. After the worktree exists, copy the plan into it per that skill's Step 3 note: `mkdir -p <worktree>/.plans && cp .plans/<ISSUE-ID>.md <worktree>/.plans/`. `.plans/` is gitignored, so the file is absent from the fresh checkout — and stays uncommittable once copied.
+4. Compose the worker prompt per that skill's Step 2. The prompt file must contain:
    - The issue identifier and URL, plus any design reference URLs from Step 2.
-   - The full plan pasted inline — `.plans/` is gitignored, so the worktree checkout will NOT contain the plan file. Also include the plan's absolute path in the main checkout for reference.
-   - Instructions to execute Steps 5–10 of this skill: implement the plan (matching the design details folded into it), run lint → typecheck → tests until green (Step 6), commit using the plan's PR prefix (Step 7), open the PR(s) per the Step 8 template and sub-issue strategy, watch CI and fix failures (Step 9), and close the issue once merged (Step 10).
-   - Linear state updates from the worker (In Review when a PR opens, Done once it merges): attempt them via the Linear MCP; if it is unreachable from the worker session, list the pending state changes in the final summary instead of failing.
-4. Spawn a **single worker** for the whole run, sub-issues included; the worker applies the sub-issue PR strategy (Step 8) from inside its worktree, creating additional branches there if the independent-scopes strategy calls for them.
-5. Report per `spawn-worktree-agent`'s Step 5, plus the Linear state change already made, then stop — Steps 5–11 run in the worker, not in this session.
+   - A pointer to the plan at `.plans/<ISSUE-ID>.md` **relative to the worker's working directory** (copied in item 3) — do not paste the plan inline; one pointer beats a copy that can drift. Include the plan's absolute path in the main checkout only as a fallback.
+   - Instructions to execute Steps 5–9 of this skill: implement the plan (matching the design details folded into it), run lint → typecheck → tests until green (Step 6), commit using the plan's PR prefix (Step 7), open the PR(s) per the Step 8 template and sub-issue strategy, and watch CI until green, fixing failures (Step 9).
+   - "Do NOT update Linear and do NOT wait for the merge — the launcher session owns issue state and close-out."
+5. Spawn a **single worker** for the whole run, sub-issues included; the worker applies the sub-issue PR strategy (Step 8) from inside its worktree, creating additional branches there if the independent-scopes strategy calls for them.
+6. **Keep ownership of Linear state after launching.** Watch for the PR(s) on the worker's branch(es) — `gh pr list --head <branch> --json number,url,title` — using whatever non-blocking mechanism the session offers (background polling, a monitor tool, scheduled wakeups). When a PR opens: apply Step 8's state changes from this session (In Review + attach the PR link to the covered issues). When it merges (`gh pr view <n> --json mergedAt`): apply Step 10 (Done). If this session must end before then, hand off explicitly — tell the user exactly which state changes remain and what event triggers each.
+7. Report per `spawn-worktree-agent`'s Step 5, plus the Linear state change already made and how the PR watch from item 6 will run. Implementation (Steps 5–9) happens in the worker, not in this session.
 
 ### In-session mode — everywhere else
 
